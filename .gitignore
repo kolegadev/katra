@@ -7,3 +7,12 @@ dist/
 .DS_Store
 data/
 gitea-data/
+
+# Terraform
+terraform/aws/.terraform/
+terraform/aws/*.tfstate
+terraform/aws/*.tfstate.backup
+terraform/aws/.terraform.lock.hcl
+
+# Helm chart dependencies (already in Chart.lock)
+helm/katra/charts/

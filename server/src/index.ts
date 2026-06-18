@@ -9,7 +9,7 @@ import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import dotenv from 'dotenv';
 
-import { connect_to_mongodb, is_database_connected, get_pool_health } from './database/connection.js';
+import { connect_to_mongodb, is_database_connected, get_pool_health, get_client } from './database/connection.js';
 import { close_redis_connection, is_redis_healthy } from './database/redis-connection.js';
 import { llmService } from './services/llm-service.js';
 import { embeddingService } from './services/embedding-service.js';
@@ -23,9 +23,12 @@ import { create_ingestion_routes } from './routes/ingestion-routes.js';
 import { create_assets_routes } from './routes/asset-routes.js';
 import { create_diagnostic_routes } from './routes/health-routes.js';
 import { create_admin_routes } from './routes/admin-routes.js';
+import { create_tenant_routes } from './routes/tenant-routes.js';
 
 // MCP server
 import { startMcpServer } from './mcp-server.js';
+import { isMultiTenant, runWithTenant } from './database/tenant-context.js';
+import { resolveTenant, initTenantSystem } from './services/tenant-service.js';
 
 dotenv.config();
 
@@ -74,11 +77,39 @@ async function main() {
   // Simple API key auth (skip for health endpoints)
   app.use('/api/*', async (c, next) => {
     // Skip auth for health checks
-    if (c.req.path.startsWith('/api/health')) {
+    if (c.req.path === '/api/v1/health' || c.req.path.startsWith('/api/v1/ingestion-timeout')) {
       return next();
     }
 
     const apiKey = process.env.KATRA_API_KEY;
+
+    // Multi-tenant mode: resolve API key to tenant
+    if (isMultiTenant()) {
+      const auth = c.req.header('Authorization');
+      const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+      if (!token) {
+        return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
+      }
+
+      // Admin key gets full access (including tenant management)
+      if (apiKey && token === apiKey) {
+        return next();
+      }
+
+      // Resolve tenant
+      const tenant = await resolveTenant(token);
+      if (!tenant) {
+        return c.json({ error: 'Unauthorized', message: 'Invalid API key' }, 401);
+      }
+
+      // Set tenant context for downstream handlers
+      return runWithTenant(
+        { tenant_id: tenant.tenant_id, database_name: tenant.database_name, plan: tenant.plan },
+        () => next()
+      );
+    }
+
+    // Single-tenant mode (default)
     if (!apiKey) {
       // No API key configured — open access (local dev mode)
       return next();
@@ -100,6 +131,13 @@ async function main() {
   app.route('/api/v1/memory/enhance', create_knowledge_graph_routes());
   app.route('/api/v1/assets', create_assets_routes());
   app.route('/api/v1/admin', create_admin_routes());
+
+  // Tenant management (multi-tenant mode only)
+  if (isMultiTenant()) {
+    await initTenantSystem();
+    app.route('/api/v1/tenants', create_tenant_routes());
+    console.log('  🏢 Multi-tenant mode: ENABLED');
+  }
 
   // Root
   app.get('/', (c) => c.json({

@@ -1,9 +1,31 @@
 import { Hono } from 'hono';
 import { llmService } from '../services/llm-service.js';
+import { embeddingService } from '../services/embedding-service.js';
 import { get_database } from '../database/connection.js';
+import { is_database_connected } from '../database/connection.js';
+import { is_redis_healthy } from '../database/redis-connection.js';
 
 export const create_diagnostic_routes = (): Hono => {
   const router = new Hono();
+
+  /**
+   * Health check — no auth required
+   */
+  router.get('/health', async (c) => {
+    const mongoOk = is_database_connected();
+    const redisOk = await is_redis_healthy();
+    const llmStatus = llmService.getServiceStatus();
+    return c.json({
+      status: mongoOk && redisOk ? 'ok' : 'degraded',
+      services: {
+        mongodb: mongoOk ? 'connected' : 'disconnected',
+        redis: redisOk ? 'connected' : 'disconnected',
+        llm: llmStatus.available ? llmStatus.provider : 'unavailable',
+        embeddings: embeddingService.isReady ? 'available' : 'unavailable',
+      },
+      version: '1.0.0',
+    });
+  });
 
   /**
    * Quick diagnostic endpoint to check what's causing ingestion timeouts

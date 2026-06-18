@@ -1,0 +1,213 @@
+# ── Replica settings ──
+replicaCount: 1
+
+# ── Image ──
+image:
+  repository: openclaw/katra
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Service Account ──
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ── Pod annotations ──
+podAnnotations: {}
+podLabels: {}
+
+# ── Pod Security Context ──
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# ── Container Security Context ──
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+# ── Service ──
+service:
+  type: ClusterIP
+  ports:
+    rest: 9002
+    mcp: 3100
+
+# ── Ingress ──
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: katra.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          port: rest
+        - path: /mcp
+          pathType: Prefix
+          port: mcp
+  tls: []
+  #  - secretName: katra-tls
+  #    hosts:
+  #      - katra.local
+
+# ── Resource limits & requests ──
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# ── Liveness & Readiness probes ──
+livenessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: rest
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: rest
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# ── Startup probe (optional) ──
+startupProbe:
+  enabled: false
+  httpGet:
+    path: /api/v1/health
+    port: rest
+  initialDelaySeconds: 0
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 30
+
+# ── Autoscaling ──
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+# ── Pod Disruption Budget ──
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# ── Node selection ──
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# ── Extra volumes / volume mounts ──
+extraVolumes: []
+extraVolumeMounts: []
+
+# ── Extra containers (sidecars) ──
+extraContainers: []
+
+# ── Pod lifecycle hooks ──
+lifecycle: {}
+
+# ── Environment Configuration ──
+# Non-sensitive configuration — mounted as ConfigMap
+config:
+  # Server
+  PORT: "9002"
+  MCP_PORT: "3100"
+  HOST: "0.0.0.0"
+  # Database
+  DATABASE_NAME: "katra"
+  # LLM Provider — supported: local | openai | anthropic | deepseek | google | custom
+  LLM_PROVIDER: "local"
+  # LLM_MODEL: ""
+  # LLM_BASE_URL: ""
+  # Embeddings Provider — supported: local | openai | custom
+  EMBEDDING_PROVIDER: "local"
+  # EMBEDDING_MODEL: "text-embedding-3-small"
+  # S3-compatible Object Storage
+  S3_ENDPOINT: "http://minio:9000"
+  S3_REGION: "us-east-1"
+  S3_BUCKET_NAME: "katra-assets"
+  # Multi-tenancy (SaaS mode)
+  # MULTI_TENANT: "true"
+  # TENANT_ISOLATION: "database"
+
+# ── Secrets ──
+# Pass sensitive values here. These become a Kubernetes Secret.
+# Leave any value empty and set envFromSecret to supply from an external secret.
+secrets:
+  # MongoDB — auto-populated when mongodb subchart is enabled
+  MONGODB_URI: ""
+  # Redis — auto-populated when redis subchart is enabled
+  REDIS_URL: ""
+  # API auth
+  KATRA_API_KEY: ""
+  # JWT secret for dashboard access (SaaS mode)
+  # JWT_SECRET: ""
+  # LLM provider keys
+  LLM_API_KEY: ""
+  # Embeddings provider key
+  EMBEDDING_API_KEY: ""
+  # S3 credentials
+  AWS_ACCESS_KEY_ID: ""
+  AWS_SECRET_ACCESS_KEY: ""
+
+# ── External Secret reference ──
+# Name of an existing Kubernetes Secret to mount as envFrom.
+# When set, the built-in Secret is not created.
+envFromSecret: ""
+
+# ── MongoDB subchart (Bitnami) ──
+mongodb:
+  enabled: true
+  auth:
+    rootUser: admin
+    rootPassword: ""
+  persistence:
+    enabled: true
+    size: 8Gi
+  # replicaCount: 1
+  # architecture: standalone
+
+# ── Redis subchart (Bitnami) ──
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  architecture: standalone
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# ── MinIO (optional, production uses external S3) ──
+# MinIO is NOT bundled as a subchart. For production, configure
+# config.S3_ENDPOINT and secrets.AWS_* to point at your S3 provider.
+# For local dev, run MinIO separately or add it as a dependency.
+minio:
+  enabled: false

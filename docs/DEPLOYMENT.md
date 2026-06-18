@@ -128,6 +128,54 @@ katra.example.com {
 }
 ```
 
+## SaaS / Multi-Tenant Mode
+
+Katra supports database-per-tenant isolation for SaaS deployments.
+
+### Enable Multi-Tenancy
+
+```bash
+# .env
+MULTI_TENANT=true
+KATRA_API_KEY=your-admin-key   # Admin key for tenant management
+```
+
+### Tenant Lifecycle
+
+```bash
+# Create a tenant (returns API key — save it!)
+curl -X POST http://localhost:9002/api/v1/tenants \
+  -H "Authorization: Bearer your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Acme Corp","email":"admin@acme.com","plan":"pro"}'
+
+# List tenants
+curl http://localhost:9002/api/v1/tenants \
+  -H "Authorization: Bearer your-admin-key"
+
+# Update tenant (change plan, deactivate)
+curl -X PATCH http://localhost:9002/api/v1/tenants/TENANT_ID \
+  -H "Authorization: Bearer your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"plan":"enterprise"}'
+
+# Regenerate API key
+curl -X POST http://localhost:9002/api/v1/tenants/TENANT_ID/regenerate-key \
+  -H "Authorization: Bearer your-admin-key"
+
+# Delete tenant (drops their database — GDPR right-to-erasure)
+curl -X DELETE "http://localhost:9002/api/v1/tenants/TENANT_ID?confirm=true" \
+  -H "Authorization: Bearer your-admin-key"
+```
+
+### How It Works
+
+- Each tenant gets a unique API key (`katra_<random>`)
+- Each tenant gets a separate MongoDB database (`katra_tnt_<id>`)
+- `AsyncLocalStorage` propagates tenant context through the request lifecycle
+- Admin key (`KATRA_API_KEY`) can manage tenants; tenant keys can only access their own data
+- Plans: `free` (100MB, 1 user), `pro` (1GB, 10 users), `enterprise` (10GB, 100 users)
+
 ## Running on Raspberry Pi
 
 Katra is designed to run on a Raspberry Pi 5 (8GB):

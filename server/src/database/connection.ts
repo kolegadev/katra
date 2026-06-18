@@ -1,6 +1,7 @@
 import { MongoClient, Db } from 'mongodb';
 import { createHash } from 'crypto';
 import { runDatabaseMigrations } from './migrations.js';
+import { getTenantContext, isMultiTenant } from './tenant-context.js';
 
 /**
  * MongoDB Atlas enforces a max database name length of 38 bytes on some tiers.
@@ -150,6 +151,16 @@ export const connect_to_mongodb = async (): Promise<Db | null> => {
 };
 
 export const get_database = (): Db => {
+  if (!client) {
+    throw new Error('Database not connected. Call connect_to_mongodb() first.');
+  }
+  // Multi-tenant: return the tenant's database if in a tenant context
+  if (isMultiTenant()) {
+    const ctx = getTenantContext();
+    if (ctx) {
+      return client.db(ctx.database_name);
+    }
+  }
   if (!database) {
     throw new Error('Database not connected. Call connect_to_mongodb() first.');
   }
@@ -188,4 +199,11 @@ export const close_connection = async (): Promise<void> => {
     client = null;
     database = null;
   }
+};
+
+/**
+ * Get the raw MongoClient (for tenant database management).
+ */
+export const get_client = (): MongoClient | null => {
+  return client;
 };
