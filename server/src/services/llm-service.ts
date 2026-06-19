@@ -8,6 +8,54 @@ interface LLMProvider {
   client: OpenAI | null;
 }
 
+export interface LLMConfig {
+  provider: string;       // e.g. "deepseek", "openai", "moonshot", "ollama", "custom"
+  api_key: string;        // API key (empty for ollama)
+  base_url: string;       // e.g. "https://api.deepseek.com/v1"
+  model: string;          // e.g. "deepseek-v4-flash"
+}
+
+/** Sensible defaults per provider name. */
+const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string }> = {
+  deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
+  openai:   { base_url: 'https://api.openai.com/v1',   model: 'gpt-4o' },
+  moonshot: { base_url: 'https://api.moonshot.cn/v1',   model: 'moonshot-v1-8k' },
+  ollama:   { base_url: 'http://host.docker.internal:11434/v1', model: 'llama3.2' },
+  custom:   { base_url: '', model: '' },
+};
+
+async function get_db() {
+  const { get_database } = await import('../database/connection.js');
+  return get_database();
+}
+
+/**
+ * Read LLM config from MongoDB system_settings.
+ * Returns null if not configured (caller falls back to env vars).
+ */
+export async function get_llm_config_from_db(): Promise<LLMConfig | null> {
+  try {
+    const db = await get_db();
+    const doc = await db.collection('system_settings').findOne({ key: 'llm_config' });
+    if (doc?.value) {
+      return doc.value as LLMConfig;
+    }
+  } catch { /* DB not ready yet */ }
+  return null;
+}
+
+/**
+ * Persist LLM config to MongoDB system_settings.
+ */
+export async function save_llm_config_to_db(config: LLMConfig): Promise<void> {
+  const db = await get_db();
+  await db.collection('system_settings').updateOne(
+    { key: 'llm_config' },
+    { $set: { key: 'llm_config', value: config, updated_at: new Date() } },
+    { upsert: true },
+  );
+}
+
 export class LLMService {
   private providers: LLMProvider[] = [];
   private available: boolean = false;
@@ -16,14 +64,13 @@ export class LLMService {
     this.initialize();
   }
 
+  /**
+   * Initialize from env vars (immediate, non-blocking).
+   * DB config is loaded async via reconfigure_from_db() on startup.
+   */
   private initialize(): void {
-    // Generic OpenAI-compatible provider registration via env vars.
-    // Supports any number of providers with the pattern:
-    //   LLM_PROVIDER_<NAME>_API_KEY, LLM_PROVIDER_<NAME>_BASE_URL, LLM_PROVIDER_<NAME>_MODEL
-    // Also supports legacy env vars for backward compatibility.
     const providerConfigs: Array<{ name: string; key: string; baseUrl: string; model: string }> = [];
 
-    // Legacy: DeepSeek
     if (process.env.DEEPSEEK_API_KEY) {
       providerConfigs.push({
         name: 'deepseek',
@@ -33,7 +80,6 @@ export class LLMService {
       });
     }
 
-    // Legacy: Moonshot
     if (process.env.MOONSHOT_API_KEY) {
       providerConfigs.push({
         name: 'moonshot',
@@ -43,7 +89,6 @@ export class LLMService {
       });
     }
 
-    // Legacy: OpenAI
     if (process.env.OPENAI_API_KEY) {
       providerConfigs.push({
         name: 'openai',
@@ -53,7 +98,6 @@ export class LLMService {
       });
     }
 
-    // Generic: LLM_PROVIDERS comma-separated list (e.g., "deepseek,openai,custom")
     const genericList = process.env.LLM_PROVIDERS;
     if (genericList) {
       for (const name of genericList.split(',').map(s => s.trim().toLowerCase())) {
@@ -71,32 +115,80 @@ export class LLMService {
 
     for (const cfg of providerConfigs) {
       try {
-        const client = new OpenAI({
-          apiKey: cfg.key,
-          baseURL: cfg.baseUrl,
-          timeout: 60000,
-          maxRetries: 2,
-        });
-        this.providers.push({
-          name: cfg.name,
-          model: cfg.model,
-          available: false,
-          client,
-        });
-        console.log(`🔧 LLM Provider registered: ${cfg.name} (${cfg.model})`);
+        const client = new OpenAI({ apiKey: cfg.key, baseURL: cfg.baseUrl, timeout: 60000, maxRetries: 2 });
+        this.providers.push({ name: cfg.name, model: cfg.model, available: false, client });
+        console.log(`🔧 LLM Provider registered (env): ${cfg.name} (${cfg.model})`);
       } catch (error) {
         console.error(`❌ Failed to initialize ${cfg.name}:`, error);
       }
     }
 
     if (this.providers.length === 0) {
-      console.warn('⚠️ No LLM providers configured. Set LLM_PROVIDERS and LLM_PROVIDER_<NAME>_API_KEY, or DEEPSEEK_API_KEY / OPENAI_API_KEY / MOONSHOT_API_KEY to enable AI responses.');
+      console.warn('⚠️ No LLM providers in env vars. Will check DB config on startup.');
     } else {
-      // Validate provider asynchronously without blocking startup
-      this.validateProviders().catch((err) =>
-        console.error('❌ Provider validation failed:', err)
-      );
+      this.validateProviders().catch((err) => console.error('❌ Provider validation failed:', err));
     }
+  }
+
+  /**
+   * Reconfigure from DB-stored config. Called on startup and when config is updated via API/MCP.
+   * Replaces all env-var providers with the DB config.
+   */
+  async reconfigure_from_db(): Promise<boolean> {
+    const config = await get_llm_config_from_db();
+    if (!config || !config.api_key) return false;
+
+    return this.apply_config(config);
+  }
+
+  /**
+   * Apply a specific LLM config (from DB, API, or MCP tool).
+   * Replaces all existing providers.
+   */
+  apply_config(config: LLMConfig): boolean {
+    this.providers = [];
+    this.available = false;
+
+    const defaults = PROVIDER_DEFAULTS[config.provider] || PROVIDER_DEFAULTS.custom;
+    const baseUrl = config.base_url || defaults.base_url;
+    const model = config.model || defaults.model;
+
+    if (!baseUrl || !model) {
+      console.warn(`⚠️ Cannot apply LLM config: missing base_url or model for provider "${config.provider}"`);
+      return false;
+    }
+
+    try {
+      const client = new OpenAI({
+        apiKey: config.api_key || 'ollama-no-key',
+        baseURL: baseUrl,
+        timeout: 60000,
+        maxRetries: 2,
+      });
+      this.providers.push({ name: config.provider, model, available: false, client });
+      console.log(`🔧 LLM Provider registered (DB/API): ${config.provider} (${model}) at ${baseUrl}`);
+
+      // Validate async
+      this.validateProviders().catch((err) => console.error('❌ Provider validation failed:', err));
+      return true;
+    } catch (error) {
+      console.error(`❌ Failed to apply LLM config:`, error);
+      return false;
+    }
+  }
+
+  /** Get current config (for display — masks API key). */
+  get_current_config(): { provider: string; base_url: string; model: string; api_key_masked: string; source: string } {
+    const p = this.providers[0];
+    if (!p) return { provider: 'none', base_url: '', model: '', api_key_masked: '', source: 'none' };
+    // We can't recover the original key from the OpenAI client, so just show if one exists
+    return {
+      provider: p.name,
+      base_url: (p.client as any)?.baseURL || '',
+      model: p.model,
+      api_key_masked: '••••••••',
+      source: 'env or db',
+    };
   }
 
   private async validateProviders(): Promise<void> {
@@ -119,15 +211,11 @@ export class LLMService {
         }
       } catch (error: any) {
         provider.available = false;
-        console.warn(
-          `⚠️ LLM Provider validation failed for ${provider.name}:`,
-          error?.message || String(error)
-        );
+        console.warn(`⚠️ LLM Provider validation failed for ${provider.name}:`, error?.message || String(error));
       }
     }
-
     this.available = this.providers.some((p) => p.available);
-    if (!this.available) {
+    if (!this.available && this.providers.length > 0) {
       console.error('❌ No LLM providers are available. AI responses will not work.');
     }
   }
@@ -138,7 +226,7 @@ export class LLMService {
 
   public async extractStructuredData(inputText: string, context?: string): Promise<any> {
     const provider = this.getActiveProvider();
-    if (!provider) throw new Error('No LLM provider available. Check LLM_PROVIDERS and LLM_PROVIDER_<NAME>_API_KEY env vars.');
+    if (!provider) throw new Error('No LLM provider available. Configure via dashboard, MCP configure_llm tool, or env vars.');
 
     const prompt = this.buildExtractionPrompt(inputText, context);
     let content: string | null = null;
@@ -148,11 +236,7 @@ export class LLMService {
       const response = await client.chat.completions.create({
         model: provider.model,
         messages: [
-          {
-            role: 'system',
-            content:
-              'You are an expert at extracting structured data from unstructured text. Always respond with valid JSON.',
-          },
+          { role: 'system', content: 'You are an expert at extracting structured data from unstructured text. Always respond with valid JSON.' },
           { role: 'user', content: prompt },
         ],
         temperature: 0.1,
@@ -161,7 +245,6 @@ export class LLMService {
       const msg = response.choices[0]?.message as any;
       content = msg?.content || msg?.reasoning_content || null;
     } catch (error: any) {
-      // Mark provider unavailable on auth errors
       if (error?.status === 401 || error?.status === 403) {
         provider.available = false;
         this.available = this.providers.some((p) => p.available);
@@ -186,11 +269,7 @@ export class LLMService {
 
   public async generateResponse(prompt: string, context?: string, history?: Array<{ role: string; content: string }>): Promise<string> {
     const provider = this.getActiveProvider() || this.providers[0] || null;
-    if (!provider) {
-      throw new Error(
-        'No LLM provider is available. Please configure LLM_PROVIDERS and LLM_PROVIDER_<NAME>_API_KEY env vars.'
-      );
-    }
+    if (!provider) throw new Error('No LLM provider available. Configure via dashboard, MCP configure_llm tool, or env vars.');
 
     const systemPrompt = `You are Solomon, the cognitive-memory-chat agent. You are NOT a generic AI — you are the deployed instance running on the user's system.
 
@@ -222,12 +301,9 @@ CRITICAL RULES:
       { role: 'system', content: systemPrompt }
     ];
 
-    // If we have conversation history, include it as actual messages
-    // This is more effective than a system prompt for DeepSeek
     if (history && history.length > 0) {
-      messages.push(...history.slice(-8)); // Keep last 8 messages to avoid timeout
+      messages.push(...history.slice(-8));
     } else if (context) {
-      // Fallback: include context as a system message if no structured history
       messages[0].content += `\n\nThe following is your memory of past conversations. Treat these as your own memories:\n\n${context}`;
     }
 
@@ -244,8 +320,6 @@ CRITICAL RULES:
       const finishReason = response.choices[0]?.finish_reason;
       const msg = response.choices[0]?.message as any;
       let content = msg?.content || msg?.reasoning_content || 'I apologize, but I was unable to generate a response.';
-      // Strip DeepSeek DSML tool-calling markup that may leak into reasoning_content
-      // DSML uses fullwidth vertical bar: ｜ (U+FF5C)
       content = content.replace(/<｜｜DSML｜｜[^>]*>[^]*?<\/｜｜DSML｜｜[^>]*>/g, '').trim();
       if (finishReason === 'length') {
         console.warn(`⚠️ DeepSeek response truncated by token limit — ${content.length} chars`);
@@ -260,19 +334,13 @@ CRITICAL RULES:
     }
   }
 
-  /**
-   * Generate a structured JSON response (for extraction/classification tasks).
-   * Uses response_format: json_object when the provider supports it.
-   */
   public async generateStructuredResponse(
     systemPrompt: string,
     userPrompt: string,
     maxTokens: number = 1000
   ): Promise<Record<string, unknown>> {
     const provider = this.getActiveProvider() || this.providers[0] || null;
-    if (!provider) {
-      throw new Error('No LLM provider available for structured extraction');
-    }
+    if (!provider) throw new Error('No LLM provider available for structured extraction');
 
     try {
       const client = provider.client as OpenAI;
@@ -288,7 +356,6 @@ CRITICAL RULES:
         max_tokens: maxTokens,
       };
 
-      // DeepSeek supports response_format; some providers don't
       try {
         params.response_format = { type: 'json_object' };
         const response = await client.chat.completions.create(
@@ -298,7 +365,6 @@ CRITICAL RULES:
         const content = msg?.content || msg?.reasoning_content || '{}';
         return JSON.parse(content);
       } catch (formatError: any) {
-        // If json_object not supported, retry without it
         if (formatError?.status === 400 || formatError?.message?.includes('response_format')) {
           delete params.response_format;
           const response = await client.chat.completions.create(
@@ -306,10 +372,8 @@ CRITICAL RULES:
           );
           const msg = response.choices[0]?.message as any;
           const content = msg?.content || msg?.reasoning_content || '{}';
-          // Try to extract JSON from markdown code blocks or raw object
           const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || content.match(/(\{[\s\S]*\})/);
           const rawJson = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
-          // Handle case where LLM wraps JSON in prose: find first { and last }
           const firstBrace = rawJson.indexOf('{');
           const lastBrace = rawJson.lastIndexOf('}');
           const extracted = firstBrace >= 0 && lastBrace > firstBrace ? rawJson.slice(firstBrace, lastBrace + 1) : rawJson;
@@ -327,10 +391,6 @@ CRITICAL RULES:
     }
   }
 
-  /**
-   * Simple JSON extraction — sends a clean system prompt (no "helpful assistant")
-   * and returns parsed JSON. Tries response_format first, falls back to raw JSON parse.
-   */
   public async extractJson(
     systemInstruction: string,
     userContent: string,
@@ -348,7 +408,6 @@ CRITICAL RULES:
       { role: 'user', content: userContent },
     ];
 
-    // Strategy 1: Try with response_format: json_object
     try {
       const response = await client.chat.completions.create({
         model: provider.model,
@@ -361,7 +420,6 @@ CRITICAL RULES:
       const content = msg?.content || '{}';
       return JSON.parse(content);
     } catch (error: any) {
-      // If response_format not supported, fall through to strategy 2
       if (error?.status !== 400 && error?.status !== 404 && !error?.message?.includes('response_format')) {
         if (error?.status === 401 || error?.status === 403) {
           provider.available = false;
@@ -371,7 +429,6 @@ CRITICAL RULES:
       }
     }
 
-    // Strategy 2: Fallback — no response_format, aggressive JSON prompt
     try {
       const response = await client.chat.completions.create({
         model: provider.model,
@@ -384,9 +441,7 @@ CRITICAL RULES:
       });
       const msg = response.choices[0]?.message as any;
       let content = msg?.content || '{}';
-      // Strip any markdown wrapping
       content = content.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-      // Find JSON object boundaries
       const firstBrace = content.indexOf('{');
       const lastBrace = content.lastIndexOf('}');
       if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -421,10 +476,7 @@ CRITICAL RULES:
       const response = await client.chat.completions.create({
         model: provider.model,
         messages: [
-          {
-            role: 'system',
-            content: 'You are a semantic relevance ranking engine. Respond ONLY with valid JSON.',
-          },
+          { role: 'system', content: 'You are a semantic relevance ranking engine. Respond ONLY with valid JSON.' },
           { role: 'user', content: userContent },
         ],
         temperature: 0.1,
@@ -549,10 +601,6 @@ CRITICAL RULES:
 - Maintain contextual nuance and emotional undertones`;
   }
 
-  /**
-   * Generate a response from a full messages array (chain/tool mode).
-   * Uses the provided messages as-is — caller controls the system prompt.
-   */
   public async generateChatResponse(
     messages: Array<{ role: string; content: string }>,
     options?: { temperature?: number; maxTokens?: number }
@@ -596,26 +644,15 @@ CRITICAL RULES:
   }> {
     const provider = this.getActiveProvider();
     if (!provider) {
-      return {
-        success: false,
-        provider: 'none',
-        model: 'none',
-        error: 'No LLM providers configured or available',
-      };
+      return { success: false, provider: 'none', model: 'none', error: 'No LLM providers configured or available' };
     }
     try {
       const client = provider.client as OpenAI;
       const response = await client.chat.completions.create({
         model: provider.model,
         messages: [
-          {
-            role: 'system',
-            content: 'You are a helpful assistant. Respond with valid JSON only.',
-          },
-          {
-            role: 'user',
-            content: 'Return this JSON: {"test": "success", "status": "working"}',
-          },
+          { role: 'system', content: 'You are a helpful assistant. Respond with valid JSON only.' },
+          { role: 'user', content: 'Return this JSON: {"test": "success", "status": "working"}' },
         ],
         temperature: 0.1,
         max_tokens: 100,

@@ -44,6 +44,7 @@ import {
 } from './services/knowledge-graph-factory.js';
 import { embeddingService } from './services/embedding-service.js';
 import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache } from './services/memory-scope-service.js';
+import { llmService, get_llm_config_from_db, save_llm_config_to_db } from './services/llm-service.js';
 
 dotenv.config();
 
@@ -151,6 +152,15 @@ const SetMemoryScopeInput = z.object({
   mode: z.enum(['personal', 'shared', 'hybrid']).describe('Memory scope mode'),
   shared_id: z.string().optional().describe('Shared ID for communal memory (required for shared/hybrid modes)'),
   hybrid_visible_user_ids: z.array(z.string()).optional().describe('User IDs visible in hybrid mode (in addition to caller)'),
+});
+
+const GetLLMConfigInput = z.object({}).describe('Get current LLM configuration (API key is masked)');
+
+const ConfigureLLMInput = z.object({
+  provider: z.enum(['deepseek', 'openai', 'moonshot', 'ollama', 'custom']).describe('LLM provider name'),
+  api_key: z.string().describe('API key for the provider (not required for ollama)'),
+  base_url: z.string().optional().describe('Base URL for the provider API (defaults applied per provider)'),
+  model: z.string().optional().describe('Model name (defaults applied per provider)'),
 });
 
 const GetHistoryInput = z.object({
@@ -431,6 +441,16 @@ const tools = [
     name: 'set_memory_scope',
     description: 'Set memory scope mode and configuration. Modes: personal (isolated by user_id), shared (communal via shared_id), hybrid (personal + shared + other users).',
     inputSchema: zodToJsonSchema(SetMemoryScopeInput) as Record<string, unknown>,
+  },
+  {
+    name: 'get_llm_config',
+    description: 'Get the current LLM provider configuration. Shows provider name, base URL, model, and whether the service is available. API key is masked.',
+    inputSchema: zodToJsonSchema(GetLLMConfigInput) as Record<string, unknown>,
+  },
+  {
+    name: 'configure_llm',
+    description: 'Configure the LLM provider for semantic memory extraction, auto-journaling, and summaries. Reconfigures the live service without restart. The agent can call this to self-configure during setup.',
+    inputSchema: zodToJsonSchema(ConfigureLLMInput) as Record<string, unknown>,
   },
 ];
 
@@ -1522,6 +1542,73 @@ async function handleSetMemoryScope(args: unknown): Promise<TextContent[]> {
     return [{ type: 'text', text: `\u26a0\ufe0f Failed to set memory scope: ${e.message}` }];
   }
 }
+async function handleGetLLMConfig(): Promise<TextContent[]> {
+  const status = llmService.getServiceStatus();
+  const dbConfig = await get_llm_config_from_db();
+
+  const lines: string[] = [
+    '## LLM Configuration',
+    '',
+    `| Field | Value |`,
+    `|-------|-------|`,
+    `| Provider | ${status.provider} |`,
+    `| Model | ${status.model} |`,
+    `| Available | ${status.available ? '✅ Yes' : '❌ No'} |`,
+    `| Source | ${dbConfig ? 'database' : (status.provider !== 'none' ? 'env vars' : 'not configured')} |`,
+  ];
+
+  if (dbConfig) {
+    lines.push(`| Base URL | ${dbConfig.base_url} |`);
+  }
+
+  lines.push('', `**Providers:** ${status.providers.join(', ') || 'none'}`);
+
+  if (status.provider === 'none') {
+    lines.push('', '⚠️ No LLM configured. Semantic extraction, auto-journaling, and summaries are disabled.', '', 'Configure via the `configure_llm` MCP tool or the dashboard at http://localhost:9012/dashboard/');
+  }
+
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+async function handleConfigureLLM(args: unknown): Promise<TextContent[]> {
+  const input = ConfigureLLMInput.parse(args);
+
+  // Apply defaults for known providers
+  const defaults: Record<string, { base_url: string; model: string }> = {
+    deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
+    openai:   { base_url: 'https://api.openai.com/v1',   model: 'gpt-4o' },
+    moonshot: { base_url: 'https://api.moonshot.cn/v1',   model: 'moonshot-v1-8k' },
+    ollama:   { base_url: 'http://host.docker.internal:11434/v1', model: 'llama3.2' },
+  };
+
+  const config = {
+    provider: input.provider,
+    api_key: input.api_key,
+    base_url: input.base_url || defaults[input.provider]?.base_url || '',
+    model: input.model || defaults[input.provider]?.model || '',
+  };
+
+  if (input.provider !== 'ollama' && !config.api_key) {
+    return [{ type: 'text', text: '❌ api_key is required for this provider.' }];
+  }
+
+  if (!config.base_url || !config.model) {
+    return [{ type: 'text', text: `❌ Could not determine base_url or model for provider "${input.provider}". Please provide base_url and model explicitly.` }];
+  }
+
+  // Save to DB
+  await save_llm_config_to_db(config);
+
+  // Apply live
+  const applied = llmService.apply_config(config);
+
+  if (applied) {
+    return [{ type: 'text', text: `✅ LLM configured: ${config.provider} (${config.model}) at ${config.base_url}\n\nValidation is running in the background. Call get_health or get_llm_config to check status.` }];
+  } else {
+    return [{ type: 'text', text: `❌ Failed to apply LLM config. Check server logs.` }];
+  }
+}
+
 function createMCPServer() {
   return new Server(
     { name: 'cognitive-memory', version: '3.0.0' },
@@ -1564,6 +1651,8 @@ function registerHandlers(server: Server) {
         case 'list_assets': result = await handleListAssets(args); break;
         case 'get_memory_scope': result = await handleGetMemoryScope(); break;
         case 'set_memory_scope': result = await handleSetMemoryScope(args); break;
+        case 'get_llm_config': result = await handleGetLLMConfig(); break;
+        case 'configure_llm': result = await handleConfigureLLM(args); break;
         default: throw new Error(`Unknown tool: ${name}`);
       }
       return { content: result, isError: false };

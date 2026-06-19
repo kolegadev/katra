@@ -420,6 +420,15 @@
           </div>
           <div id="scope-content"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>
         </div>
+
+        <!-- LLM Configuration -->
+        <div class="card" style="max-width:560px;margin-top:16px">
+          <div class="card-header">
+            <h3 class="card-title">LLM Configuration</h3>
+            <span style="font-size:0.75rem;color:var(--text-dim)">Provider for semantic extraction, auto-journaling & summaries</span>
+          </div>
+          <div id="llm-config-content"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>
+        </div>
       </section>
 
     </div>
@@ -1222,6 +1231,7 @@ async function loadSettingsConfig() {
     container.innerHTML = errorMsg('Could not reach server. Check your Base URL and API Key.', loadSettingsConfig);
   }
   loadMemoryScope();
+  loadLLMConfig();
 }
 
 /* ══════════════════════════════════════════════
@@ -1396,6 +1406,162 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ══════════════════════════════════════════════
    ║  INIT
    ══════════════════════════════════════════════ */
+
+// ── LLM Configuration ──────────────────────────────────────────
+
+async function loadLLMConfig() {
+  const container = document.getElementById('llm-config-content');
+  if (!container) return;
+
+  const { ok, data } = await apiFetch('/api/v1/admin/llm-config');
+  if (!ok) {
+    container.innerHTML = errorMsg('Could not load LLM config.', loadLLMConfig);
+    return;
+  }
+
+  const cfg = data.config;
+  const status = data.status;
+  const providers = [
+    { name: 'deepseek', label: 'DeepSeek', default_model: 'deepseek-v4-flash', default_url: 'https://api.deepseek.com/v1' },
+    { name: 'openai', label: 'OpenAI', default_model: 'gpt-4o', default_url: 'https://api.openai.com/v1' },
+    { name: 'moonshot', label: 'Moonshot', default_model: 'moonshot-v1-8k', default_url: 'https://api.moonshot.cn/v1' },
+    { name: 'ollama', label: 'Ollama (local)', default_model: 'llama3.2', default_url: 'http://host.docker.internal:11434/v1' },
+    { name: 'custom', label: 'Custom', default_model: '', default_url: '' },
+  ];
+
+  const currentProvider = cfg.provider || 'none';
+  const isConfigured = data.configured && currentProvider !== 'none';
+
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:0.8rem;color:var(--text-muted)">Status:</span>
+        ${status?.available
+          ? '<span style="font-size:0.85rem;font-weight:600;color:#22c55e">✅ ' + escapeHtml(status.provider) + ' (' + escapeHtml(status.model) + ')</span>'
+          : isConfigured
+            ? '<span style="font-size:0.85rem;font-weight:600;color:#f59e0b">⏳ ' + escapeHtml(currentProvider) + ' (validating...)</span>'
+            : '<span style="font-size:0.85rem;font-weight:600;color:#ef4444">❌ Not configured</span>'
+        }
+      </div>
+
+      ${!isConfigured ? '<div style="padding:10px 14px;background:var(--bg-input);border-radius:8px;font-size:0.8rem;color:var(--text-muted)">No LLM configured. Semantic extraction, auto-journaling, and summaries are disabled. Configure below or use the <code>configure_llm</code> MCP tool.</div>' : ''}
+
+      <div>
+        <label class="label">Provider</label>
+        <select class="input" id="llm-provider" onchange="onLLMProviderChange()" style="width:100%">
+          <option value="" ${!isConfigured ? 'selected' : ''}>— Select provider —</option>
+          ${providers.map(p => `<option value="${p.name}" ${currentProvider === p.name ? 'selected' : ''}>${p.label}</option>`).join('')}
+        </select>
+      </div>
+
+      <div>
+        <label class="label" for="llm-api-key">API Key ${cfg.provider === 'ollama' ? '<span style="color:var(--text-dim)">(not required for Ollama)</span>' : ''}</label>
+        <input class="input mono" id="llm-api-key" type="password" placeholder="sk-..." value="${cfg.api_key || ''}" ${cfg.provider === 'ollama' ? 'disabled' : ''}>
+      </div>
+
+      <div>
+        <label class="label" for="llm-base-url">Base URL</label>
+        <input class="input mono" id="llm-base-url" placeholder="https://api.example.com/v1" value="${escapeHtml(cfg.base_url || '')}">
+      </div>
+
+      <div>
+        <label class="label" for="llm-model">Model</label>
+        <input class="input mono" id="llm-model" placeholder="model-name" value="${escapeHtml(cfg.model || '')}">
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="saveLLMConfig()" id="llm-save-btn">Save & Apply</button>
+        <button class="btn btn-secondary" onclick="testLLMConfig()" id="llm-test-btn">Test Connection</button>
+        <span id="llm-save-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+      </div>
+    </div>
+  `;
+}
+
+function onLLMProviderChange() {
+  const sel = document.getElementById('llm-provider');
+  const provider = sel.value;
+  const defaults = {
+    deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
+    openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o' },
+    moonshot: { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+    ollama: { base_url: 'http://host.docker.internal:11434/v1', model: 'llama3.2' },
+  };
+
+  const keyInput = document.getElementById('llm-api-key');
+  const urlInput = document.getElementById('llm-base-url');
+  const modelInput = document.getElementById('llm-model');
+
+  if (provider === 'ollama') {
+    keyInput.disabled = true;
+    keyInput.value = '';
+  } else {
+    keyInput.disabled = false;
+  }
+
+  if (defaults[provider]) {
+    urlInput.value = defaults[provider].base_url;
+    modelInput.value = defaults[provider].model;
+  }
+}
+
+async function saveLLMConfig() {
+  const provider = document.getElementById('llm-provider').value;
+  const api_key = document.getElementById('llm-api-key').value;
+  const base_url = document.getElementById('llm-base-url').value;
+  const model = document.getElementById('llm-model').value;
+  const statusEl = document.getElementById('llm-save-status');
+
+  if (!provider) { toast('Select a provider first', 'error'); return; }
+  if (provider !== 'ollama' && !api_key) { toast('API key required for this provider', 'error'); return; }
+  if (!base_url || !model) { toast('Base URL and model are required', 'error'); return; }
+
+  // If key is masked (•••), don't send it — keep existing
+  const keyToSend = api_key.includes('••') ? '' : api_key;
+
+  const btn = document.getElementById('llm-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  statusEl.textContent = '';
+
+  const { ok, data } = await apiFetch('/api/v1/admin/llm-config', {
+    method: 'PUT',
+    body: { provider, api_key: keyToSend, base_url, model },
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Save & Apply';
+
+  if (ok && data.success) {
+    toast(data.message || 'LLM configured');
+    statusEl.textContent = 'Validating in background...';
+    setTimeout(() => loadLLMConfig(), 3000);
+  } else {
+    toast(data.error || 'Failed to save', 'error');
+    statusEl.textContent = '';
+  }
+}
+
+async function testLLMConfig() {
+  const btn = document.getElementById('llm-test-btn');
+  const statusEl = document.getElementById('llm-save-status');
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  statusEl.textContent = '';
+
+  const { ok, data } = await apiFetch('/api/v1/admin/llm-config/test', { method: 'POST' });
+
+  btn.disabled = false;
+  btn.textContent = 'Test Connection';
+
+  if (ok && data.success) {
+    toast(`✅ ${data.provider} (${data.model}) — working!`);
+    statusEl.textContent = 'Connection successful';
+  } else {
+    toast(data.error || 'Test failed', 'error');
+    statusEl.textContent = data.error || 'Failed';
+  }
+}
 
 // Load settings from localStorage on start
 document.getElementById('settings-url').value = state.baseUrl;

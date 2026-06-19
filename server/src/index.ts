@@ -15,6 +15,7 @@ import fs from 'fs';
 import { connect_to_mongodb, is_database_connected, get_pool_health, get_client } from './database/connection.js';
 import { close_redis_connection, is_redis_healthy } from './database/redis-connection.js';
 import { llmService } from './services/llm-service.js';
+import { get_llm_config_from_db } from './services/llm-service.js';
 import { embeddingService } from './services/embedding-service.js';
 import { BackgroundProcessor } from './services/background-processor.js';
 
@@ -53,6 +54,13 @@ async function main() {
 
   // Initialize LLM service (non-blocking — validates providers async)
   console.log(`  LLM: ${llmService.isServiceAvailable() ? '✅ available' : '⏳ initializing...'}`);
+
+  // Check DB for LLM config (overrides env vars if present)
+  const dbLLMConfig = await get_llm_config_from_db();
+  if (dbLLMConfig) {
+    console.log('  LLM: config found in database, applying...');
+    llmService.apply_config(dbLLMConfig);
+  }
 
   // Initialize embedding service
   console.log(`  Embeddings: ${embeddingService.modelLoaded ? '✅ available' : '⚠️ not configured'}`);

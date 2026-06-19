@@ -7,6 +7,7 @@ import { backgroundProcessor } from '../services/background-processor.js';
 import { IndexManager } from '../database/index-management.js';
 import { get_error_message, get_error_stack } from '../utils/error-utils.js';
 import { getMemoryScope, invalidateScopeCache } from '../services/memory-scope-service.js';
+import { llmService, get_llm_config_from_db, save_llm_config_to_db, type LLMConfig } from '../services/llm-service.js';
 
 export const create_admin_routes = (): Hono => {
   const router = new Hono();
@@ -832,6 +833,136 @@ export const create_admin_routes = (): Hono => {
       return c.json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
+  });
+
+  // ── LLM Configuration ──────────────────────────────────────
+
+  /**
+   * GET /api/v1/admin/llm-config — Get current LLM configuration
+   * Returns config with API key masked.
+   */
+  router.get('/llm-config', async (c) => {
+    try {
+      const dbConfig = await get_llm_config_from_db();
+      const status = llmService.getServiceStatus();
+
+      if (dbConfig) {
+        return c.json({
+          success: true,
+          configured: true,
+          source: 'database',
+          config: {
+            provider: dbConfig.provider,
+            base_url: dbConfig.base_url,
+            model: dbConfig.model,
+            api_key: dbConfig.api_key ? '••••••••' : '',
+          },
+          status,
+        });
+      }
+
+      // Fall back to env vars
+      const envProvider =
+        process.env.DEEPSEEK_API_KEY ? 'deepseek' :
+        process.env.OPENAI_API_KEY ? 'openai' :
+        process.env.MOONSHOT_API_KEY ? 'moonshot' : 'none';
+
+      return c.json({
+        success: true,
+        configured: envProvider !== 'none',
+        source: envProvider !== 'none' ? 'env' : 'none',
+        config: {
+          provider: envProvider,
+          base_url: '',
+          model: '',
+          api_key: envProvider !== 'none' ? '••••••••' : '',
+        },
+        status,
+      });
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  });
+
+  /**
+   * PUT /api/v1/admin/llm-config — Update LLM configuration
+   * Saves to MongoDB system_settings and reconfigures the LLM service live.
+   */
+  router.put('/llm-config', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { provider, api_key, base_url, model } = body;
+
+      if (!provider) {
+        return c.json({ success: false, error: 'provider is required (deepseek, openai, moonshot, ollama, custom)' }, 400);
+      }
+
+      // Apply defaults for known providers
+      const defaults: Record<string, { base_url: string; model: string }> = {
+        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
+        openai:   { base_url: 'https://api.openai.com/v1',   model: 'gpt-4o' },
+        moonshot: { base_url: 'https://api.moonshot.cn/v1',   model: 'moonshot-v1-8k' },
+        ollama:   { base_url: 'http://host.docker.internal:11434/v1', model: 'llama3.2' },
+      };
+
+      const cfg: LLMConfig = {
+        provider,
+        api_key: api_key || '',
+        base_url: base_url || defaults[provider]?.base_url || '',
+        model: model || defaults[provider]?.model || '',
+      };
+
+      // For ollama, api_key is not required
+      if (provider !== 'ollama' && !cfg.api_key) {
+        return c.json({ success: false, error: 'api_key is required for this provider' }, 400);
+      }
+
+      if (!cfg.base_url || !cfg.model) {
+        return c.json({ success: false, error: 'base_url and model are required' }, 400);
+      }
+
+      // Save to DB
+      await save_llm_config_to_db(cfg);
+
+      // Apply live (replaces all providers)
+      const applied = llmService.apply_config(cfg);
+
+      return c.json({
+        success: applied,
+        message: applied
+          ? `LLM configured: ${cfg.provider} (${cfg.model}) — validating...`
+          : 'Failed to apply LLM config',
+        config: {
+          provider: cfg.provider,
+          base_url: cfg.base_url,
+          model: cfg.model,
+          api_key: '••••••••',
+        },
+      });
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  });
+
+  /**
+   * POST /api/v1/admin/llm-config/test — Test LLM connection
+   */
+  router.post('/llm-config/test', async (c) => {
+    try {
+      const result = await llmService.testService();
+      return c.json({ success: result.success, ...result });
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       }, 500);
     }
   });
