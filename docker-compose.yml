@@ -1,56 +1,68 @@
+# ════════════════════════════════════════════════════════════════════
+#  Katra — Cognitive Memory for AI Agents
+#  docker-compose.yml
+#
+#  Quick start:
+#    1. Copy .env.example → .env, edit as needed
+#    2. docker-compose up -d --build
+#    3. Point your agent at http://localhost:3112/mcp
+#
+#  USB storage:
+#    Set DATA_DIR=/mnt/usb-secrets/katra in .env
+#    (or any path — all persistent data goes there)
+# ════════════════════════════════════════════════════════════════════
+
 services:
+  # ── MongoDB ──────────────────────────────────────────────────────
   mongo:
     image: mongo:7.0
     container_name: katra-mongo
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
-      - mongo-data:/data/db
+      - ${DATA_DIR:-./data}/mongo:/data/db
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: katra-local-dev
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-katra-local-dev}
     command: ["--bind_ip_all", "--auth"]
     networks:
       - katra-net
 
+  # ── Redis ────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: katra-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
-      - redis-data:/data
+      - ${DATA_DIR:-./data}/redis:/data
     command: redis-server --appendonly yes
     networks:
       - katra-net
 
+  # ── MinIO (S3-compatible object storage for assets) ──────────────
   minio:
     image: minio/minio:latest
     container_name: katra-minio
     restart: unless-stopped
-    ports:
-      - "9000:9000"
-      - "9001:9001"
     volumes:
-      - minio-data:/data
+      - ${DATA_DIR:-./data}/minio:/data
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: katra-local-dev
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS:-katra-local-dev}
     command: server /data --console-address ":9001"
     networks:
       - katra-net
 
-  katra:
+  # ── Katra Server ─────────────────────────────────────────────────
+  server:
     build:
       context: .
       dockerfile: Dockerfile
+    image: katra/server:latest
     container_name: katra-server
     restart: unless-stopped
     ports:
-      - "9002:9002"
-      - "3100:3100"
+      - "${HOST_MCP_PORT:-3112}:3100"   # MCP endpoint — point your agent here
+      - "${HOST_API_PORT:-9012}:9002"   # Admin REST API
     env_file:
       - .env
     depends_on:
@@ -59,11 +71,6 @@ services:
       - minio
     networks:
       - katra-net
-
-volumes:
-  mongo-data:
-  redis-data:
-  minio-data:
 
 networks:
   katra-net:

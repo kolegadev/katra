@@ -1,0 +1,10 @@
+**/node_modules
+**/build
+.git
+**/*.md
+!server/esbuild.config.mjs
+.env
+.env.*
+data/
+**/.DS_Store
+**/dist
