@@ -6,7 +6,7 @@ Give your AI agent **persistent memory**. Katra is a self-contained memory appli
 drop it on any machine with Docker, point your agent at it via MCP, and get
 episodic recall, semantic search, knowledge graphs, and temporal analysis.
 
-Any MCP-compatible agent works: OpenClaw, Claude Code, OpenCode, Codex CLI, or
+Any MCP-compatible agent works: OpenClaw, Claude Code, OpenCode, Codex CLI, Kolega Code or
 anything that speaks the Model Context Protocol.
 
 ## Quick Start
