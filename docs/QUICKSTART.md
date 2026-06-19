@@ -4,9 +4,8 @@ Get Katra running in 5 minutes.
 
 ## Prerequisites
 
-- **Docker** and **Docker Compose** (for containerized deployment)
-- **Python 3.11+** (for the watcher daemon, optional)
-- Any MCP-compatible agent (OpenClaw, Claude Code, etc.) — optional for testing
+- **Docker** and **Docker Compose** (v1 `docker-compose` or v2 `docker compose`)
+- Any MCP-compatible agent (optional — you can test via curl)
 
 ## 1. Clone and Configure
 
@@ -19,44 +18,71 @@ cp .env.example .env
 Edit `.env` — set at minimum:
 
 ```bash
-KATRA_API_KEY=your-secret-api-key
-MONGODB_URI=mongodb://admin:yourpassword@mongo:27017/katra?authSource=admin
-DEEPSEEK_API_KEY=sk-your-deepseek-key     # Or remove to use local-only mode
+MCP_API_KEY=your-mcp-secret-key       # Your agent sends this
+KATRA_API_KEY=your-admin-secret-key   # For REST API + dashboard
 ```
 
 ## 2. Start the Server
 
 ```bash
-docker compose up -d
+docker-compose up -d --build
 ```
 
-This starts MongoDB, Redis, MinIO, and the Katra server.
+This starts 4 containers: MongoDB, Redis, MinIO, and the Katra server.
 
 ## 3. Verify
 
 ```bash
-# Health check
-curl http://localhost:9002/api/v1/health
+# MCP health (no auth required)
+curl http://localhost:3112/health
 
-# MCP health
-curl http://localhost:3100/health
+# Admin API health
+curl -H "Authorization: Bearer your-admin-secret-key" \
+  http://localhost:9012/api/v1/health
 ```
 
 You should see `{"status":"ok",...}`.
 
+Open the dashboard: **http://localhost:9012/dashboard/**
+
 ## 4. Store Your First Memory
 
 ```bash
-curl -X POST http://localhost:9002/api/v1/memory/episodic/events \
-  -H "Authorization: Bearer your-secret-api-key" \
+curl -X POST http://localhost:3112/mcp \
+  -H "Authorization: Bearer your-mcp-secret-key" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{
-    "user_id": "my-agent",
-    "session_id": "getting-started",
-    "event_type": "user_message",
-    "content": {
-      "role": "user",
-      "message": "Hello Katra! This is my first memory."
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "test", "version": "1.0"}
+    }
+  }'
+```
+
+Grab the `mcp-session-id` from the response headers, then:
+
+```bash
+curl -X POST http://localhost:3112/mcp \
+  -H "Authorization: Bearer your-mcp-secret-key" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: SESSION_ID_FROM_STEP_1" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "store_memory",
+      "arguments": {
+        "content": "Hello Katra! This is my first memory.",
+        "user_id": "my-agent",
+        "category": "event"
+      }
     }
   }'
 ```
@@ -64,28 +90,38 @@ curl -X POST http://localhost:9002/api/v1/memory/episodic/events \
 ## 5. Search Memories
 
 ```bash
-curl -X POST http://localhost:9002/api/v1/memory/episodic/search \
-  -H "Authorization: Bearer your-secret-api-key" \
+curl -X POST http://localhost:3112/mcp \
+  -H "Authorization: Bearer your-mcp-secret-key" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: SESSION_ID" \
   -d '{
-    "query": "first memory",
-    "user_id": "my-agent"
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "search_memories",
+      "arguments": {
+        "query": "first memory",
+        "user_id": "my-agent"
+      }
+    }
   }'
 ```
 
-## 6. Connect an Agent (MCP)
+## 6. Connect Your Agent
 
-Add to your agent's MCP config:
+Add Katra to your agent's MCP config:
 
 ```json
 {
   "mcp": {
     "servers": {
       "katra": {
-        "url": "http://localhost:3100/mcp",
+        "url": "http://localhost:3112/mcp",
         "transport": "sse",
         "headers": {
-          "Authorization": "Bearer your-secret-api-key",
+          "Authorization": "Bearer your-mcp-secret-key",
           "Accept": "application/json, text/event-stream"
         }
       }
@@ -94,31 +130,66 @@ Add to your agent's MCP config:
 }
 ```
 
-Restart your agent. It now has 25 memory tools available natively.
+Restart your agent. It now has 27 memory tools available.
 
-## 7. Deploy the Watcher (Optional)
+## 7. Configure Identity Mode (Optional)
 
-Auto-ingest conversation logs from any supported platform:
+By default, each agent's memories are isolated (personal mode). To enable shared
+or hybrid memory across multiple agents:
+
+**Via dashboard:** http://localhost:9012/dashboard/ → Settings → Memory Scope
+
+**Via admin API:**
+```bash
+curl -X PUT http://localhost:9012/api/v1/admin/memory-scope \
+  -H "Authorization: Bearer your-admin-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "shared",
+    "shared_id": "my-team"
+  }'
+```
+
+## 8. Deploy the Watcher (Optional)
+
+For passive background collection from conversation logs, deploy
+[Solomem](https://github.com/kolegadev/solomem):
 
 ```bash
-mkdir -p ~/.katra
-cp watcher/katra_watcher.py ~/.katra/
-cp watcher/watcher-config.example.json ~/.katra/watcher-config.json
-# Edit watcher-config.json with your API key and platform paths
+mkdir -p ~/.solomem
+git clone https://github.com/kolegadev/solomem.git /tmp/solomem
+cp /tmp/solomem/memory_watcher.py ~/.solomem/
+
+# Create config
+cat > ~/.solomem/watcher-config.json << 'EOF'
+{
+  "mcp_url": "http://localhost:3112/mcp",
+  "api_key": "your-mcp-secret-key",
+  "user_id": "my-agent",
+  "platforms": [
+    {
+      "name": "openclaw",
+      "session_dir": "~/.openclaw/agents",
+      "glob": "**/sessions/*.jsonl",
+      "exclude": ["trajectory"]
+    }
+  ]
+}
+EOF
 
 # Backfill existing history
-python3 ~/.katra/katra_watcher.py --once --config ~/.katra/watcher-config.json
+python3 ~/.solomem/memory_watcher.py --once
 
-# Install as systemd service for continuous collection
-cp watcher/katra-watcher.service ~/.config/systemd/user/
+# Install as systemd service
+cp /tmp/solomem/memory-watcher.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now katra-watcher
+systemctl --user enable --now memory-watcher
 ```
 
 ## Next Steps
 
-- [MCP Tools Reference](MCP-TOOLS.md) — All 25 tools with examples
+- [MCP Tools Reference](MCP-TOOLS.md) — All 27 tools with examples
 - [REST API Reference](API-REFERENCE.md) — HTTP endpoints
 - [Configuration Guide](CONFIGURATION.md) — All environment variables
-- [Deployment Guide](DEPLOYMENT.md) — Production deployment
-- [SKILL.md](../SKILL.md) — Multi-platform setup guide
+- [Deployment Guide](DEPLOYMENT.md) — Cloud, K8s, USB storage
+- [SKILL.md](../SKILL.md) — Platform-specific agent setup
