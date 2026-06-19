@@ -37,6 +37,7 @@ DEFAULT_STATE_FILE = os.path.expanduser("~/.katra/kolega-code-extractor-state.js
 SCAN_INTERVAL = 30  # seconds
 MAX_TOOL_RESULT_CHARS = 4000
 MAX_MEMORY_CHARS = 100_000
+_INCLUDE_THINKING = True
 
 logging.basicConfig(
     level=logging.INFO,
