@@ -391,12 +391,12 @@
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
               <label class="label" for="settings-url">Base URL</label>
-              <input class="input mono" id="settings-url" placeholder="http://localhost:9002" value="http://localhost:9002">
+              <input class="input mono" id="settings-url" placeholder="http://100.102.217.111:9012" value="http://100.102.217.111:9012">
               <span style="font-size:0.7rem;color:var(--text-dim)">The Katra server address</span>
             </div>
             <div>
               <label class="label" for="settings-key">API Key</label>
-              <input class="input mono" id="settings-key" type="password" placeholder="sk-…">
+              <input class="input mono" id="settings-key" type="password" placeholder="sk-…" value="katra-key-2025">
               <span style="font-size:0.7rem;color:var(--text-dim)">Bearer token for Authorization header (leave blank if not required)</span>
             </div>
             <div style="display:flex;gap:8px">
@@ -426,8 +426,8 @@
 
 // ── State ──
 const state = {
-  baseUrl: localStorage.getItem('katra_baseUrl') || 'http://localhost:9002',
-  apiKey: localStorage.getItem('katra_apiKey') || '',
+  baseUrl: localStorage.getItem('katra_baseUrl') || 'http://100.102.217.111:9012',
+  apiKey: localStorage.getItem('katra_apiKey') || 'katra-key-2025',
   healthInterval: null,
   currentTab: 'overview',
   graphNodes: [],

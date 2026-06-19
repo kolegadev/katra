@@ -6,6 +6,7 @@ import { llmService } from '../services/llm-service.js';
 import { backgroundProcessor } from '../services/background-processor.js';
 import { IndexManager } from '../database/index-management.js';
 import { get_error_message, get_error_stack } from '../utils/error-utils.js';
+import { getMemoryScope, invalidateScopeCache } from '../services/memory-scope-service.js';
 
 export const create_admin_routes = (): Hono => {
   const router = new Hono();
@@ -742,6 +743,97 @@ export const create_admin_routes = (): Hono => {
       success: false,
       error: 'Conversation service not available in Katra. Use the MCP tools or REST API for memory operations.'
     }, 501);
+  });
+
+  // ── Memory Scope Configuration ────────────────────────────
+
+  /**
+   * GET /api/admin/memory-scope — Get current memory scope settings
+   */
+  router.get('/memory-scope', async (c) => {
+    try {
+      const scope = await getMemoryScope();
+      return c.json({
+        success: true,
+        scope: {
+          mode: scope.mode,
+          shared_id: scope.shared_id,
+          hybrid_visible_user_ids: scope.hybrid_visible_user_ids,
+        },
+        description: {
+          personal: 'Memories isolated by user_id (default)',
+          shared: 'Communal memory via shared_id',
+          hybrid: 'Personal + shared + other visible user_ids',
+        }
+      });
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
+  });
+
+  /**
+   * PUT /api/admin/memory-scope — Update memory scope settings
+   */
+  router.put('/memory-scope', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { mode, shared_id, hybrid_visible_user_ids } = body;
+
+      if (!mode || !['personal', 'shared', 'hybrid'].includes(mode)) {
+        return c.json({
+          success: false,
+          error: 'mode must be one of: personal, shared, hybrid'
+        }, 400);
+      }
+
+      if ((mode === 'shared' || mode === 'hybrid') && !shared_id) {
+        const current = await getMemoryScope();
+        if (!current.shared_id) {
+          return c.json({
+            success: false,
+            error: 'shared_id is required when mode is "shared" or "hybrid"'
+          }, 400);
+        }
+      }
+
+      const db = get_database();
+      const updateDoc: Record<string, unknown> = {
+        key: 'memory_scope',
+        mode,
+        updated_at: new Date(),
+      };
+
+      if (shared_id !== undefined) updateDoc.shared_id = shared_id;
+      if (hybrid_visible_user_ids !== undefined) updateDoc.hybrid_visible_user_ids = hybrid_visible_user_ids;
+
+      await db.collection('system_settings').updateOne(
+        { key: 'memory_scope' },
+        { $set: updateDoc },
+        { upsert: true }
+      );
+
+      invalidateScopeCache();
+
+      const scope = await getMemoryScope();
+
+      return c.json({
+        success: true,
+        message: `Memory scope set to: ${mode}`,
+        scope: {
+          mode: scope.mode,
+          shared_id: scope.shared_id,
+          hybrid_visible_user_ids: scope.hybrid_visible_user_ids,
+        }
+      });
+    } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
   });
 
   return router;

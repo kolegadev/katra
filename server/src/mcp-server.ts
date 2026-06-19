@@ -43,6 +43,7 @@ import {
   getProspectiveMemoryService,
 } from './services/knowledge-graph-factory.js';
 import { embeddingService } from './services/embedding-service.js';
+import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache } from './services/memory-scope-service.js';
 
 dotenv.config();
 
@@ -138,9 +139,18 @@ const VectorSearchInput = z.object({
 
 const StoreMemoryInput = z.object({
   content: z.string().min(1).describe('The memory content to store'),
-  user_id: z.string().optional().describe('Optional user ID'),
+  user_id: z.string().optional().describe('Optional user ID (personal memory)'),
+  shared_id: z.string().optional().describe('Optional shared ID for communal memory (overrides user_id in shared mode)'),
   category: z.enum(['fact', 'preference', 'insight', 'event', 'general']).optional().default('general'),
   confidence: z.number().min(0).max(1).optional().default(0.8),
+});
+
+const GetMemoryScopeInput = z.object({}).describe('Get current memory scope settings');
+
+const SetMemoryScopeInput = z.object({
+  mode: z.enum(['personal', 'shared', 'hybrid']).describe('Memory scope mode'),
+  shared_id: z.string().optional().describe('Shared ID for communal memory (required for shared/hybrid modes)'),
+  hybrid_visible_user_ids: z.array(z.string()).optional().describe('User IDs visible in hybrid mode (in addition to caller)'),
 });
 
 const GetHistoryInput = z.object({
@@ -409,6 +419,17 @@ const tools = [
     description: 'List uploaded assets stored in MinIO (images, files, documents). Returns asset IDs, filenames, content types, sizes, and upload dates.',
     inputSchema: zodToJsonSchema(ListAssetsInput) as Record<string, unknown>,
   },
+  // ── Memory Scope ─────────────────────────────────────────
+  {
+    name: 'get_memory_scope',
+    description: 'Get the current memory scope settings: mode (personal/shared/hybrid), shared_id, and visible user IDs.',
+    inputSchema: zodToJsonSchema(GetMemoryScopeInput) as Record<string, unknown>,
+  },
+  {
+    name: 'set_memory_scope',
+    description: 'Set memory scope mode and configuration. Modes: personal (isolated by user_id), shared (communal via shared_id), hybrid (personal + shared + other users).',
+    inputSchema: zodToJsonSchema(SetMemoryScopeInput) as Record<string, unknown>,
+  },
 ];
 
 // ── Tool handlers ──────────────────────────────────────────────────
@@ -420,7 +441,11 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
   }
 
   const db = get_database();
-  const doc = {
+
+  // Resolve shared_id based on current memory scope mode
+  const sharedId = await resolveSharedId(input.shared_id);
+
+  const doc: Record<string, unknown> = {
     user_id: input.user_id || 'mcp-user',
     content: input.content,
     category: input.category,
@@ -430,6 +455,12 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     last_accessed: new Date(),
     access_count: 0,
   };
+
+  // Only set shared_id if scope mode requires it
+  if (sharedId) {
+    doc.shared_id = sharedId;
+  }
+
   const result = await db.collection('semantic_facts').insertOne(doc);
 
   // Fire-and-forget embedding
@@ -451,69 +482,191 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     // Embedding failed — memory is still stored
   }
 
+  const scopeInfo = sharedId ? `\n**Shared ID:** \`${sharedId}\`` : '';
   return [{
     type: 'text',
-    text: `✅ Memory stored.\n\n**ID:** \`${result.insertedId}\`\n**Content:** ${input.content}\n**Category:** ${input.category}\n**Confidence:** ${(input.confidence * 100).toFixed(0)}%`,
+    text: `✅ Memory stored.\n\n**ID:** \`${result.insertedId}\`\n**Content:** ${input.content}\n**Category:** ${input.category}\n**Confidence:** ${(input.confidence * 100).toFixed(0)}%${scopeInfo}`,
   }];
 }
 
 async function handleSearchMemories(args: unknown): Promise<TextContent[]> {
   const input = SearchMemoriesInput.parse(args);
   if (!is_database_connected()) {
-    return [{ type: 'text', text: '⚠️ MongoDB is not connected.' }];
+    return [{ type: 'text', text: '\u26a0\ufe0f MongoDB is not connected.' }];
   }
 
   const db = get_database();
-  const baseFilter: Record<string, unknown> = {};
-  if (input.user_id) baseFilter.user_id = input.user_id;
 
-  // Episodic: apply text search with regex fallback (was previously unfiltered)
-  let episodic: any[] = [];
-  try {
-    const episodicQuery: Record<string, unknown> = { ...baseFilter };
-    // Try text search on the content.message field first
-    episodic = await db.collection('episodic_events')
-      .find({ ...baseFilter, $text: { $search: input.query } })
-      .sort({ timestamp: -1 })
-      .limit(input.limit)
-      .toArray();
-  } catch {
-    // Text index not available — use regex on content.message
-    const regex = new RegExp(input.query.split(/\s+/).join('|'), 'i');
-    episodic = await db.collection('episodic_events')
-      .find({ ...baseFilter, 'content.message': { $regex: regex } })
-      .sort({ timestamp: -1 })
-      .limit(input.limit)
-      .toArray();
+  // Build scope-aware filter (personal / shared / hybrid)
+  const baseFilter = await buildScopeFilter(input.user_id);
+  const limit = input.limit || 20;
+
+  // Get scope info for output header
+  const scopeConfig = await getMemoryScope();
+
+  // Utility: escape regex special chars for safe literal matching
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const safeRegex = new RegExp(escapeRegex(input.query), 'i');
+
+  // ── Search Collections ──────────────────────────────────────────
+  const collections = [
+    { name: 'episodic_events',     label: 'Episodic',     contentPath: 'content.message' },
+    { name: 'semantic_facts',      label: 'Semantic',     contentPath: 'content' },
+    { name: 'agent_journal_manual', label: 'Journal (Manual)', contentPath: 'content' },
+    { name: 'agent_journal_auto',  label: 'Journal (Auto)',   contentPath: 'content' },
+    { name: 'knowledge_nodes',     label: 'Knowledge Graph',  contentPath: 'title' },
+    { name: 'knowledge_relationships', label: 'Relationships',  contentPath: 'relationship_type' },
+    { name: 'memory_nodes',        label: 'Memory Nodes',    contentPath: 'label' },
+    { name: 'memory_edges',        label: 'Memory Edges',    contentPath: 'label' },
+    { name: 'memory_missions',     label: 'Missions',    contentPath: 'title' },
+    { name: 'asset_metadata',      label: 'Assets',     contentPath: 'filename' },
+    { name: 'working_memory_sessions', label: 'Working Memory', contentPath: 'summary' },
+  ];
+
+  interface SearchResult {
+    source: string;
+    snippet: string;
+    timestamp?: string;
+    confidence?: number;
+    score?: number;
   }
 
-  let semantic: unknown[] = [];
+  const allResults: SearchResult[] = [];
+  const seenContent = new Set<string>();
+
+  // ── Pass 1: Vector/Semantic Search ──────────────────────────────
+  let vectorResults: SearchResult[] = [];
   try {
-    semantic = await db.collection('semantic_facts')
-      .find(input.user_id
-        ? { $text: { $search: input.query }, user_id: input.user_id }
-        : { $text: { $search: input.query } })
-      .limit(input.limit)
-      .toArray();
-  } catch {
-    const regex = new RegExp(input.query.split(/\s+/).join('|'), 'i');
-    semantic = await db.collection('semantic_facts')
-      .find({ ...baseFilter, content: { $regex: regex } })
-      .limit(input.limit)
-      .toArray();
+    if (embeddingService.isReady) {
+      const queryVec = await embeddingService.encode(input.query);
+      if (queryVec) {
+        const facts = await db.collection('semantic_facts')
+          .find({ embedding: { $exists: true } })
+          .limit(100)
+          .toArray();
+        if (facts.length > 0) {
+          vectorResults = facts
+            .map((f: any) => {
+              if (f.embedding?.length === embeddingService.embeddingDimension) {
+                const cosine = embeddingService.cosineSimilarity(queryVec, f.embedding);
+                const score = embeddingService.combinedScore(cosine, f.created_at, 0.6);
+                return {
+                  source: 'vector',
+                  snippet: f.content || f.title || '',
+                  timestamp: f.timestamp || f.created_at,
+                  confidence: f.confidence,
+                  score,
+                };
+              }
+              return { source: 'vector', snippet: '', timestamp: '', score: 0 };
+            })
+            .filter(r => r.score > 0.3)
+            .sort((a, b) => b.score! - a.score!)
+            .slice(0, limit);
+        }
+      }
+    }
+  } catch (e) {
+    // Vector search failed — continue with text search
+  }
+  for (const r of vectorResults) {
+    const key = r.snippet.slice(0, 80);
+    if (!seenContent.has(key)) {
+      seenContent.add(key);
+      allResults.push(r);
+    }
+  }
+
+  // ── Pass 2: Text Search across ALL collections ──────────────────
+  for (const col of collections) {
+    let docs: any[] = [];
+    const contentField = col.contentPath;
+
+    try {
+      // Try  index first
+      docs = await db.collection(col.name)
+        .find({ ...baseFilter, $text: { $search: input.query } })
+        .sort({ timestamp: -1 } as any)
+        .limit(limit)
+        .toArray();
+    } catch {
+      // Fall back to regex on content field + title/name fields
+      const regexFilter: Record<string, unknown> = { ...baseFilter };
+      // Build  across multiple searchable fields
+      const orConditions: Record<string, unknown>[] = [
+        { [contentField]: { $regex: safeRegex } },
+      ];
+      // Extra fields for specific collections
+      if (col.name === 'knowledge_nodes') orConditions.push({ name: { $regex: safeRegex } });
+      if (col.name === 'memory_missions')  orConditions.push({ description: { $regex: safeRegex } });
+      if (col.name === 'memory_nodes')     orConditions.push({ content: { $regex: safeRegex } });
+      if (col.name === 'knowledge_relationships') orConditions.push({ source_type: { $regex: safeRegex } });
+
+      regexFilter['$or'] = orConditions;
+      try {
+        docs = await db.collection(col.name)
+          .find(regexFilter)
+          .sort({ timestamp: -1 } as any)
+          .limit(limit)
+          .toArray();
+      } catch {
+        continue; // Skip collections that don't support this query shape
+      }
+    }
+
+    for (const doc of docs) {
+      const text = typeof doc[contentField] === 'string' ? doc[contentField]
+        : (typeof doc.content === 'string' ? doc.content
+        : (doc.title || doc.name || doc.label || doc.filename || JSON.stringify(doc).slice(0, 200)));
+
+      // Deduplicate
+      const key = text.slice(0, 80);
+      if (seenContent.has(key)) continue;
+      seenContent.add(key);
+
+      allResults.push({
+        source: col.label,
+        snippet: text.length > 300 ? text.slice(0, 300) + '...' : text,
+        timestamp: doc.timestamp || doc.created_at || doc.date,
+        confidence: doc.confidence,
+        score: 0.5,
+      });
+    }
+  }
+
+  // ── Format Output ────────────────────────────────────────────────
+  // Group by source
+  const grouped = new Map<string, SearchResult[]>();
+  for (const r of allResults) {
+    const existing = grouped.get(r.source) || [];
+    existing.push(r);
+    grouped.set(r.source, existing);
   }
 
   const lines: string[] = [
     `## Memory Search: "${input.query}"`,
-    '',
-    `### Episodic (${episodic.length})`,
+    `Found ${allResults.length} results across ${grouped.size} sources (scope: ${scopeConfig.mode})`,
   ];
-  if (episodic.length === 0) lines.push('*None*');
-  else episodic.forEach(e => lines.push(`- [${e.timestamp ? new Date(e.timestamp).toISOString() : '?'}] ${e.content?.message || JSON.stringify(e.content)}`));
 
-  lines.push('', `### Semantic Facts (${semantic.length})`);
-  if (semantic.length === 0) lines.push('*None*');
-  else (semantic as any[]).forEach(s => lines.push(`- ${s.content} (conf: ${(s.confidence * 100).toFixed(0)}%)`));
+  if (vectorResults.length > 0) {
+    lines.push('', `### 🔍 Vector (Semantic) (${vectorResults.length})`);
+    for (const r of vectorResults) {
+      lines.push(`- ${r.snippet.slice(0, 200)} (score: ${r.score?.toFixed(2)})`);
+    }
+  }
+
+  for (const [source, results] of grouped) {
+    if (source === 'vector') continue;
+    lines.push('', `### ${source} (${results.length})`);
+    for (const r of results) {
+      const ts = r.timestamp ? ` [${new Date(r.timestamp).toISOString()}]` : '';
+      lines.push(`-${ts} ${r.snippet.slice(0, 250)}`);
+    }
+  }
+
+  if (allResults.length === 0) {
+    lines.push('', '*No results found across any collection. Try a different query or check if the memory system has been populated.*');
+  }
 
   return [{ type: 'text', text: lines.join('\n') }];
 }
@@ -1254,6 +1407,74 @@ async function handleListAssets(args: unknown): Promise<TextContent[]> {
   }
 }
 
+// ── Memory Scope Handlers ──────────────────────────────────────────
+
+async function handleGetMemoryScope(): Promise<TextContent[]> {
+  const scope = await getMemoryScope();
+  const lines: string[] = [
+    '## Memory Scope Settings',
+    '',
+    `**Mode:** ${scope.mode}`,
+    `**Shared ID:** ${scope.shared_id || '(not set)'}`,
+    `**Hybrid Visible User IDs:** ${scope.hybrid_visible_user_ids.length > 0 ? scope.hybrid_visible_user_ids.join(', ') : '(none)'}`,
+    '',
+    '### Mode Descriptions',
+    '- **personal**: Memories isolated by user_id (default, backward-compatible)',
+    '- **shared**: Communal memory via shared_id — all machines with same shared_id see everything',
+    '- **hybrid**: Personal (user_id) + shared (shared_id) + other users (hybrid_visible_user_ids)',
+  ];
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+async function handleSetMemoryScope(args: unknown): Promise<TextContent[]> {
+  const input = SetMemoryScopeInput.parse(args);
+
+  // Validate: shared/hybrid mode requires shared_id
+  if ((input.mode === 'shared' || input.mode === 'hybrid') && !input.shared_id) {
+    const current = await getMemoryScope();
+    if (!current.shared_id && !input.shared_id) {
+      return [{ type: 'text', text: '\u26a0\ufe0f shared_id is required when mode is "shared" or "hybrid".' }];
+    }
+  }
+
+  try {
+    const db = get_database();
+
+    const updateDoc: Record<string, unknown> = {
+      key: 'memory_scope',
+      mode: input.mode,
+      updated_at: new Date(),
+    };
+
+    if (input.shared_id !== undefined) {
+      updateDoc.shared_id = input.shared_id;
+    }
+    if (input.hybrid_visible_user_ids !== undefined) {
+      updateDoc.hybrid_visible_user_ids = input.hybrid_visible_user_ids;
+    }
+
+    await db.collection('system_settings').updateOne(
+      { key: 'memory_scope' },
+      { $set: updateDoc },
+      { upsert: true }
+    );
+
+    // Invalidate cache so next search uses new settings
+    invalidateScopeCache();
+
+    const scope = await getMemoryScope();
+    const lines: string[] = [
+      '\u2705 Memory scope updated.',
+      '',
+      `**Mode:** ${scope.mode}`,
+      `**Shared ID:** ${scope.shared_id || '(not set)'}`,
+      `**Hybrid Visible User IDs:** ${scope.hybrid_visible_user_ids.length > 0 ? scope.hybrid_visible_user_ids.join(', ') : '(none)'}`,
+    ];
+    return [{ type: 'text', text: lines.join('\n') }];
+  } catch (e: any) {
+    return [{ type: 'text', text: `\u26a0\ufe0f Failed to set memory scope: ${e.message}` }];
+  }
+}
 function createMCPServer() {
   return new Server(
     { name: 'cognitive-memory', version: '3.0.0' },
@@ -1294,6 +1515,8 @@ function registerHandlers(server: Server) {
         case 'get_transaction_log': result = await handleGetTransactionLog(args); break;
         case 'get_heartbeat_status': result = await handleGetHeartbeatStatus(args); break;
         case 'list_assets': result = await handleListAssets(args); break;
+        case 'get_memory_scope': result = await handleGetMemoryScope(); break;
+        case 'set_memory_scope': result = await handleSetMemoryScope(args); break;
         default: throw new Error(`Unknown tool: ${name}`);
       }
       return { content: result, isError: false };

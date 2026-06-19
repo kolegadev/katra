@@ -38,6 +38,10 @@ export const MEMORY_SYSTEM_INDEXES: CollectionIndexes = {
       options: { name: 'user_session_timestamp', background: true }
     },
     {
+      keys: { shared_id: 1, timestamp: -1 },
+      options: { name: 'shared_timestamp', sparse: true, background: true }
+    },
+    {
       keys: { content_hash: 1 },
       options: { name: 'content_hash', unique: false, sparse: true, background: true }
     },
@@ -97,6 +101,10 @@ export const MEMORY_SYSTEM_INDEXES: CollectionIndexes = {
       options: { name: 'user_fact_type', background: true }
     },
     {
+      keys: { shared_id: 1, fact_type: 1 },
+      options: { name: 'shared_fact_type', sparse: true, background: true }
+    },
+    {
       keys: { session_id: 1, user_id: 1 },
       options: { name: 'session_user', background: true }
     },
@@ -130,6 +138,10 @@ export const MEMORY_SYSTEM_INDEXES: CollectionIndexes = {
     {
       keys: { user_id: 1, status: 1 },
       options: { name: 'user_status_index', background: true }
+    },
+    {
+      keys: { shared_id: 1, status: 1 },
+      options: { name: 'shared_status_index', sparse: true, background: true }
     },
     {
       keys: { updated_at: -1 },
@@ -196,6 +208,14 @@ export const MEMORY_SYSTEM_INDEXES: CollectionIndexes = {
     {
       keys: { user_id: 1, timestamp: -1 },
       options: { name: 'user_timestamp', background: true }
+    }
+  ],
+
+  // System settings collection for memory scope and other runtime config
+  system_settings: [
+    {
+      keys: { key: 1 },
+      options: { name: 'key_unique', unique: true, background: true }
     }
   ]
 };
