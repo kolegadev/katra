@@ -297,6 +297,7 @@
   <main class="main">
     <header class="main-header">
       <h2 id="page-title">Overview</h2>
+      <div id="scope-badge" style="margin-left:auto"></div>
       <div class="header-actions">
         <span id="refresh-indicator" style="font-size:0.7rem;color:var(--text-dim);display:none;">Auto-refresh 30s</span>
         <button class="btn btn-secondary btn-sm" onclick="refreshCurrentTab()" id="refresh-btn">↻ Refresh</button>
@@ -391,12 +392,12 @@
           <div style="display:flex;flex-direction:column;gap:14px">
             <div>
               <label class="label" for="settings-url">Base URL</label>
-              <input class="input mono" id="settings-url" placeholder="http://100.102.217.111:9012" value="http://100.102.217.111:9012">
+              <input class="input mono" id="settings-url" placeholder="http://100.102.217.111:9012" value="http://localhost:9012">
               <span style="font-size:0.7rem;color:var(--text-dim)">The Katra server address</span>
             </div>
             <div>
               <label class="label" for="settings-key">API Key</label>
-              <input class="input mono" id="settings-key" type="password" placeholder="sk-…" value="katra-key-2025">
+              <input class="input mono" id="settings-key" type="password" placeholder="sk-…" value="katra-test-key">
               <span style="font-size:0.7rem;color:var(--text-dim)">Bearer token for Authorization header (leave blank if not required)</span>
             </div>
             <div style="display:flex;gap:8px">
@@ -409,6 +410,15 @@
         <div class="card" style="max-width:560px;margin-top:16px">
           <div class="card-header"><h3 class="card-title">Server Config</h3></div>
           <div id="settings-config"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>
+        </div>
+
+        <!-- Memory Scope -->
+        <div class="card" style="max-width:560px;margin-top:16px">
+          <div class="card-header">
+            <h3 class="card-title">Memory Scope</h3>
+            <span style="font-size:0.75rem;color:var(--text-dim)">Identity mode for agent memories</span>
+          </div>
+          <div id="scope-content"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>
         </div>
       </section>
 
@@ -591,17 +601,19 @@ async function loadOverview() {
   cards.innerHTML = '<div class="card"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>'.repeat(3);
 
   // Parallel fetches
-  const [infoRes, healthRes, dbRes, bgRes] = await Promise.allSettled([
+  const [infoRes, healthRes, dbRes, bgRes, scopeRes] = await Promise.allSettled([
     apiFetch('/'),
     apiFetch('/api/v1/memory/health'),
     apiFetch('/api/v1/memory/stats/database'),
     apiFetch('/api/v1/admin/background/status'),
+    apiFetch('/api/v1/admin/memory-scope'),
   ]);
 
   const info = infoRes.value?.ok ? infoRes.value.data : null;
   const health = healthRes.value?.ok ? healthRes.value.data : null;
   const dbStats = dbRes.value?.ok ? dbRes.value.data : null;
   const bgStats = bgRes.value?.ok ? bgRes.value.data : null;
+  const scopeData = scopeRes.value?.ok ? scopeRes.value.data : null;
 
   // Determine overall status
   let statusClass = 'unknown', statusText = 'Unknown';
@@ -612,6 +624,17 @@ async function loadOverview() {
   const dot = document.getElementById('sidebar-dot');
   dot.className = `dot ${statusClass === 'healthy' ? 'green' : statusClass === 'degraded' ? 'amber' : 'red'}`;
   document.getElementById('sidebar-status').textContent = statusText;
+
+  // Scope badge
+  if (scopeData?.scope) {
+    const s = scopeData.scope;
+    const badges = { personal: '\u{1F512} Personal', shared: '\u{1F310} Shared', hybrid: '\u{1F517} Hybrid' };
+    const colors = { personal: 'var(--accent)', shared: 'var(--green)', hybrid: 'var(--amber)' };
+    const scopeEl = document.getElementById('scope-badge');
+    if (scopeEl) {
+      scopeEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;background:${colors[s.mode]}22;border:1px solid ${colors[s.mode]}44;border-radius:20px;font-size:0.8rem;font-weight:600;color:${colors[s.mode]}">${badges[s.mode] || s.mode}</span>`;
+    }
+  }
 
   cards.innerHTML = `
     <div class="card">
@@ -1197,6 +1220,159 @@ async function loadSettingsConfig() {
     container.innerHTML = `<div class="json-viewer">${escapeHtml(JSON.stringify(safe, null, 2))}</div>`;
   } else {
     container.innerHTML = errorMsg('Could not reach server. Check your Base URL and API Key.', loadSettingsConfig);
+  }
+  loadMemoryScope();
+}
+
+/* ══════════════════════════════════════════════
+   ║  MEMORY SCOPE
+   ══════════════════════════════════════════════ */
+
+let visibleUsers = [];
+
+async function loadMemoryScope() {
+  const container = document.getElementById('scope-content');
+  if (!container) return;
+
+  const { ok, data } = await apiFetch('/api/v1/admin/memory-scope');
+  if (!ok) {
+    container.innerHTML = errorMsg('Could not load memory scope.', loadMemoryScope);
+    return;
+  }
+
+  const scope = data.scope;
+  const descs = {
+    personal: 'Each agent has private memories, isolated by user_id. No sharing.',
+    shared: 'All agents with the same shared_id see everything. Communal consciousness.',
+    hybrid: 'Personal memories + shared pool + visible users. Best of both worlds.',
+  };
+
+  container.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:0.8rem;color:var(--text-muted)">Current mode:</span>
+        <span style="font-size:0.95rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em">${scope.mode}</span>
+      </div>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin:-10px 0 0 0">${descs[scope.mode] || ''}</p>
+
+      <div>
+        <label class="label">Mode</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ${scope.mode==='personal'?'btn-primary':'btn-secondary'}" onclick="setScopeMode('personal')" style="flex:1;min-width:100px">\u{1F512} Personal</button>
+          <button class="btn ${scope.mode==='shared'?'btn-primary':'btn-secondary'}" onclick="setScopeMode('shared')" style="flex:1;min-width:100px">\u{1F310} Shared</button>
+          <button class="btn ${scope.mode==='hybrid'?'btn-primary':'btn-secondary'}" onclick="setScopeMode('hybrid')" style="flex:1;min-width:100px">\u{1F517} Hybrid</button>
+        </div>
+      </div>
+
+      <div>
+        <label class="label" for="scope-shared-id">Shared ID</label>
+        <input class="input mono" id="scope-shared-id" placeholder="e.g. solomem-collective" value="${scope.shared_id || ''}" ${scope.mode==='personal'?'disabled':''}>
+        <span style="font-size:0.7rem;color:var(--text-dim)">Used in shared & hybrid modes — all agents with this ID share memories</span>
+      </div>
+
+      <div id="hybrid-section" style="display:${scope.mode==='hybrid'?'block':'none'}">
+        <label class="label">Hybrid Visible User IDs</label>
+        <div style="display:flex;gap:8px;margin-bottom:6px">
+          <input class="input mono" id="scope-new-user" placeholder="user_id to add">
+          <button class="btn btn-secondary" onclick="addVisibleUser()" style="flex-shrink:0">Add</button>
+        </div>
+        <div id="visible-users-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <span style="font-size:0.7rem;color:var(--text-dim)">These agents' memories are visible in hybrid mode</span>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="saveMemoryScope()" id="scope-save-btn">Save Changes</button>
+        <span id="scope-save-status" style="font-size:0.8rem;color:var(--text-muted)"></span>
+      </div>
+    </div>
+  `;
+
+  container.dataset.selectedMode = scope.mode;
+  renderVisibleUsers(scope.hybrid_visible_user_ids || []);
+}
+
+function renderVisibleUsers(users) {
+  visibleUsers = users.slice();
+  const c = document.getElementById('visible-users-list');
+  if (!c) return;
+  if (visibleUsers.length === 0) {
+    c.innerHTML = '<span style="font-size:0.8rem;color:var(--text-dim)">No additional visible users</span>';
+    return;
+  }
+  c.innerHTML = visibleUsers.map((u, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--bg-input);border:1px solid var(--border-light);border-radius:20px;font-size:0.8rem;font-family:var(--font-mono)">${escapeHtml(u)}<button onclick="removeVisibleUser(${i})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1rem;padding:0 0 0 2px;line-height:1">\u00d7</button></span>`
+  ).join('');
+}
+
+function addVisibleUser() {
+  const input = document.getElementById('scope-new-user');
+  const user = input.value.trim();
+  if (!user) return;
+  if (!visibleUsers.includes(user)) {
+    visibleUsers.push(user);
+    renderVisibleUsers(visibleUsers);
+  }
+  input.value = '';
+}
+
+function removeVisibleUser(idx) {
+  visibleUsers.splice(idx, 1);
+  renderVisibleUsers(visibleUsers);
+}
+
+function setScopeMode(mode) {
+  const c = document.getElementById('scope-content');
+  if (!c) return;
+  c.dataset.selectedMode = mode;
+  // Update mode buttons
+  c.querySelectorAll('button').forEach(btn => {
+    const map = { '\u{1F512} Personal': 'personal', '\u{1F310} Shared': 'shared', '\u{1F517} Hybrid': 'hybrid' };
+    const m = map[btn.textContent.trim()];
+    if (m) btn.className = `btn ${m === mode ? 'btn-primary' : 'btn-secondary'}`;
+  });
+  // Enable/disable shared_id
+  const sharedInput = document.getElementById('scope-shared-id');
+  if (sharedInput) sharedInput.disabled = (mode === 'personal');
+  // Show/hide hybrid section
+  const hs = document.getElementById('hybrid-section');
+  if (hs) hs.style.display = (mode === 'hybrid') ? 'block' : 'none';
+}
+
+async function saveMemoryScope() {
+  const c = document.getElementById('scope-content');
+  const mode = c?.dataset?.selectedMode || 'personal';
+  const sharedId = document.getElementById('scope-shared-id')?.value.trim() || undefined;
+  const statusEl = document.getElementById('scope-save-status');
+  const btn = document.getElementById('scope-save-btn');
+
+  if ((mode === 'shared' || mode === 'hybrid') && !sharedId) {
+    statusEl.textContent = '\u26a0\ufe0f Shared ID is required for shared/hybrid mode';
+    statusEl.style.color = 'var(--red)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving\u2026';
+  statusEl.textContent = '';
+
+  const body = { mode };
+  if (sharedId) body.shared_id = sharedId;
+  if (mode === 'hybrid') body.hybrid_visible_user_ids = visibleUsers;
+
+  const { ok, data } = await apiFetch('/api/v1/admin/memory-scope', { method: 'PUT', body });
+
+  btn.disabled = false;
+  btn.textContent = 'Save Changes';
+
+  if (ok && data.success) {
+    statusEl.textContent = '\u2705 Saved';
+    statusEl.style.color = 'var(--green)';
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    loadMemoryScope();
+    loadOverview(); // Refresh the badge
+  } else {
+    statusEl.textContent = `\u26a0\ufe0f ${data?.error || 'Failed to save'}`;
+    statusEl.style.color = 'var(--red)';
   }
 }
 

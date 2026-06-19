@@ -31,6 +31,9 @@ RUN npm ci --production && npm cache clean --force
 # Copy built artifacts from builder stage
 COPY --from=builder /app/build ./build
 
+# Copy dashboard (static HTML)
+COPY dashboard/ ./dashboard/
+
 # Expose ports: MCP (3100) + Admin API (9002)
 EXPOSE 3100 9002
 

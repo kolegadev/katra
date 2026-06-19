@@ -7,7 +7,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
 import { connect_to_mongodb, is_database_connected, get_pool_health, get_client } from './database/connection.js';
 import { close_redis_connection, is_redis_healthy } from './database/redis-connection.js';
@@ -146,7 +149,16 @@ async function main() {
     description: 'Cognitive Memory as a Service for AI Agents',
     docs: '/api/v1/health',
     mcp: `http://${HOST}:${MCP_PORT}/mcp`,
+    dashboard: '/dashboard',
   }));
+
+  // Serve dashboard (static HTML)
+  const dashboardPath = path.resolve(process.cwd(), 'dashboard');
+  if (fs.existsSync(dashboardPath)) {
+    app.use('/dashboard/*', serveStatic({ root: dashboardPath, rewriteRequestPath: (p) => p.replace(/^\/dashboard/, '') || '/' }));
+    app.get('/dashboard', (c) => c.redirect('/dashboard/'));
+    console.log('  📊 Dashboard: http://' + HOST + ':' + PORT + '/dashboard');
+  }
 
   // Start REST API server
   serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
