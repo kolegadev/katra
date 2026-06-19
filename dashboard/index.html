@@ -667,8 +667,8 @@ async function loadOverview() {
     </div>
     <div class="card">
       <div class="card-header"><h3 class="card-title">Background Processor</h3>
-        <span class="status-badge ${bgStats?.stats?.running ? 'healthy' : 'unknown'}">
-          <span class="status-dot ${bgStats?.stats?.running ? 'green' : 'gray'}"></span>${bgStats?.stats?.running ? 'Running' : 'Stopped'}
+        <span class="status-badge ${bgStats?.stats?.is_running ? 'healthy' : 'unknown'}">
+          <span class="status-dot ${bgStats?.stats?.is_running ? 'green' : 'gray'}"></span>${bgStats?.stats?.is_running ? 'Running' : 'Stopped'}
         </span>
       </div>
       <div class="card-value">${fmtNum(bgStats?.stats?.processed_events || '—')}</div>
