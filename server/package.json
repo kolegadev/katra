@@ -33,7 +33,8 @@
     "typescript": "~5.8.3"
   },
   "overrides": {
-    "protobufjs": "^7.5.5"
+    "protobufjs": "^7.5.5",
+    "flatbuffers": "^2.0.8"
   },
   "license": "MIT"
 }
