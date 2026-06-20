@@ -16,6 +16,7 @@ export interface EntityResolutionContext {
   entityType?: string;
   confidence?: number;
   contextTerms?: string[];
+  preferredId?: string;
 }
 
 export interface ResolvedEntity {
@@ -107,27 +108,39 @@ class EntityResolver {
   private async findEntityCandidates(context: EntityResolutionContext): Promise<KnowledgeNode[]> {
     const db = get_database();
     const entityText = context.entityText.toLowerCase();
-    
+    const escapedText = entityText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const firstToken = entityText.split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Scope candidate search to the requesting user to prevent cross-user leaks
+    const scopeFilter: any = { 'properties.user_id': context.userId };
+
     // Strategy 1: Exact name match
     const exactMatches = await db.collection('knowledge_nodes').find({
-      'properties.name': { $regex: `^${entityText}$`, $options: 'i' }
+      ...scopeFilter,
+      'properties.name': { $regex: `^${escapedText}$`, $options: 'i' }
     }).toArray();
 
-    // Strategy 2: Fuzzy name matching
+    // Strategy 2: Fuzzy name matching (word characters separated by any chars)
+    const fuzzyPattern = escapedText.split(/\s+/).join('.*');
     const fuzzyMatches = await db.collection('knowledge_nodes').find({
-      'properties.name': { $regex: entityText.replace(/\s+/g, '.*'), $options: 'i' }
+      ...scopeFilter,
+      'properties.name': { $regex: fuzzyPattern, $options: 'i' }
     }).limit(10).toArray();
 
     // Strategy 3: Alias matching
     const aliasMatches = await db.collection('knowledge_nodes').find({
-      'properties.aliases': { $elemMatch: { $regex: entityText, $options: 'i' } }
+      ...scopeFilter,
+      'properties.aliases': { $elemMatch: { $regex: escapedText, $options: 'i' } }
     }).limit(5).toArray();
 
     // Strategy 4: Context-based matching
     let contextMatches: any[] = [];
     if (context.contextTerms && context.contextTerms.length > 0) {
-      const contextPattern = context.contextTerms.join('|');
+      const contextPattern = context.contextTerms
+        .map((t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
       contextMatches = await db.collection('knowledge_nodes').find({
+        ...scopeFilter,
         'properties.description': { $regex: contextPattern, $options: 'i' }
       }).limit(5).toArray();
     }
@@ -136,8 +149,9 @@ class EntityResolver {
     let typeMatches: any[] = [];
     if (context.entityType) {
       typeMatches = await db.collection('knowledge_nodes').find({
+        ...scopeFilter,
         type: context.entityType,
-        'properties.name': { $regex: entityText.split(/\s+/)[0], $options: 'i' }
+        'properties.name': { $regex: firstToken, $options: 'i' }
       }).limit(5).toArray();
     }
 
@@ -294,11 +308,13 @@ class EntityResolver {
    * Create a new canonical entity
    */
   private async createCanonicalEntity(context: EntityResolutionContext): Promise<ResolvedEntity> {
-    const canonicalId = `entity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+    const canonicalId = context.preferredId || `entity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
     const entity: KnowledgeNode = {
       id: canonicalId,
       type: context.entityType || 'entity',
+      user_id: context.userId,
+      session_id: context.sessionId,
       properties: {
         name: context.entityText,
         canonical_name: context.entityText,
@@ -307,6 +323,7 @@ class EntityResolver {
         confidence: context.confidence || 0.8,
         sessions: context.sessionId ? [context.sessionId] : [],
         user_id: context.userId,
+        session_id: context.sessionId,
         created_from_resolution: true
       },
       created_at: new Date(),
@@ -353,8 +370,12 @@ class EntityResolver {
     // Update entity properties
     const updatedEntity: KnowledgeNode = {
       ...entity,
+      user_id: entity.user_id || context.userId,
+      session_id: entity.session_id || context.sessionId,
       properties: {
         ...entity.properties,
+        user_id: entity.properties?.user_id || context.userId,
+        session_id: entity.properties?.session_id || context.sessionId,
         aliases,
         sessions,
         last_seen: new Date(),
@@ -700,10 +721,8 @@ class EntityResolver {
           console.error(`❌ Failed to merge entities in cluster ${cluster.clusterId}:`, error);
         }
       } else {
-        // Update entities with improved properties
-        for (const entity of cluster.entities) {
-          entitiesUpdated++;
-        }
+        // No mergeable cluster; nothing to update here.
+        // Future: could boost confidence or refresh last_seen for singletons.
       }
     }
 

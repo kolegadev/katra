@@ -7,7 +7,8 @@ import { backgroundProcessor } from '../services/background-processor.js';
 import { IndexManager } from '../database/index-management.js';
 import { get_error_message, get_error_stack } from '../utils/error-utils.js';
 import { getMemoryScope, invalidateScopeCache } from '../services/memory-scope-service.js';
-import { llmService, get_llm_config_from_db, save_llm_config_to_db, type LLMConfig } from '../services/llm-service.js';
+import { get_llm_config_from_db, save_llm_config_to_db, type LLMConfig } from '../services/llm-service.js';
+import { entityResolver } from '../services/entity-resolver.js';
 
 export const create_admin_routes = (): Hono => {
   const router = new Hono();
@@ -638,6 +639,38 @@ export const create_admin_routes = (): Hono => {
         stats: stats
       });
     } catch (error) {
+      return c.json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }, 500);
+    }
+  });
+
+  /**
+   * Trigger batch entity resolution for a user.
+   * POST /api/admin/resolve-entities
+   */
+  router.post('/resolve-entities', async (c) => {
+    try {
+      const body = await c.req.json();
+      const userId = body.user_id;
+
+      if (!userId) {
+        return c.json({
+          success: false,
+          error: 'Missing required field: user_id'
+        }, 400);
+      }
+
+      const result = await entityResolver.batchResolveEntities(userId);
+
+      return c.json({
+        success: true,
+        message: `Batch entity resolution completed for ${userId}`,
+        result
+      });
+    } catch (error) {
+      console.error('❌ Batch entity resolution failed:', error);
       return c.json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

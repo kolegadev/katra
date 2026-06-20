@@ -45,10 +45,23 @@ Store a memory (fact, preference, insight, event, or general).
 | shared_id | string | No | — |
 | category | enum: `fact`, `preference`, `insight`, `event`, `general` | No | `general` |
 | confidence | number (0–1) | No | 0.8 |
+| session_id | string | No | — |
+| source | string | No | `mcp_store` |
+| tags | string[] | No | `[]` |
+
+**Notes:**
+- `category: "event"` routes the memory through the episodic event pipeline and uses `session_id` for grouping.
+- `source` and `tags` help downstream filtering and audit trails.
+- Memories are content-hash deduplicated.
 
 **Example:**
 ```json
 {"name":"store_memory","arguments":{"content":"User prefers dark mode","user_id":"my-agent","category":"preference","confidence":0.95}}
+```
+
+**Episodic event example:**
+```json
+{"name":"store_memory","arguments":{"content":"User asked about Katra memory fixes","user_id":"my-agent","category":"event","session_id":"thread-123","source":"kolega-code","tags":["conversation"]}}
 ```
 
 ### store_journal
@@ -222,10 +235,10 @@ Query AI-generated time-block summaries (day, week, or month granularity).
 | Parameter | Type | Required | Default |
 |---|---|---|---|
 | user_id | string | Yes | — |
-| block_type | enum: `day`, `week`, `month` | No | `week` |
+| block_type | enum: `day`, `week`, `month` | No | — |
 | from | ISO 8601 date | No | 30 days ago |
 | to | ISO 8601 date | No | now |
-| limit | number | No | 20 |
+| limit | number (1–50) | No | 20 |
 
 ### summarize_time_blocks
 

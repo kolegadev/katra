@@ -9,6 +9,13 @@
 
 import { get_database } from '../database/connection.js';
 
+/**
+ * System-wide default user id. Used as the fallback for both store and search
+ * when no user_id is supplied, so the two sides stay aligned. Reads from
+ * SOLOMEM_USER_ID (set in .env) so deployments can configure it in one place.
+ */
+export const DEFAULT_USER_ID = process.env.SOLOMEM_USER_ID || 'mcp-user';
+
 export interface MemoryScopeConfig {
   mode: 'personal' | 'shared' | 'hybrid';
   shared_id: string | null;
@@ -59,8 +66,10 @@ export async function buildScopeFilter(user_id?: string): Promise<Record<string,
 
   switch (scope.mode) {
     case 'personal':
-      // Backward-compatible: filter by user_id only
-      return user_id ? { user_id } : {};
+      // Filter by user_id. When none is supplied, fall back to the system
+      // default user id rather than returning {} (which would leak every
+      // user's memories). This keeps store and search defaults aligned.
+      return { user_id: user_id || DEFAULT_USER_ID };
 
     case 'shared':
       // Communal: filter by shared_id only

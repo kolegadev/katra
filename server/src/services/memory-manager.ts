@@ -5,7 +5,7 @@
 
 import { get_database } from '../database/connection.js';
 import { ObjectId } from 'mongodb';
-import { generateContentHash, generateIdempotencyKey } from './content-hash-utils.js';
+import { generateContentHash, generateIdempotencyKey, stableContentHash } from './content-hash-utils.js';
 import type { 
   EpisodicEvent, 
   KnowledgeNode, 
@@ -158,16 +158,59 @@ export class MemoryManager {
 
   async mark_event_processing_failed(event_id: string, error_message: string): Promise<void> {
     const db = get_database();
+    const MAX_RETRIES = 3;
+
+    // Increment retry count and decide if this is a terminal failure.
     await db.collection('episodic_events').updateOne(
       { id: event_id },
       {
         $set: {
           'metadata.processing_failed': true,
           'metadata.processing_error': error_message,
-          'metadata.processing_failed_at': new Date()
-        }
+          'metadata.processing_failed_at': new Date(),
+        },
+        $inc: { 'metadata.processing_attempts': 1 },
       }
     );
+
+    // After MAX_RETRIES attempts, mark the event as processed so it stops
+    // being fetched every cycle. This prevents infinite retry loops on
+    // permanently broken events.
+    const event = await db.collection('episodic_events').findOne({ id: event_id });
+    const attempts = (event?.metadata?.processing_attempts as number) || 1;
+    if (attempts >= MAX_RETRIES) {
+      await db.collection('episodic_events').updateOne(
+        { id: event_id },
+        {
+          $set: {
+            'metadata.processed': true,
+            'metadata.terminal_failure': true,
+            'metadata.terminal_failure_at': new Date(),
+          },
+        }
+      );
+    }
+
+    // Update the processing log from 'processing' to 'failed' so the event can
+    // be retried (unless it has hit MAX_RETRIES and been marked processed).
+    const idempotencyKey = event?.idempotency_key;
+    if (idempotencyKey) {
+      try {
+        await db.collection('processing_log').updateOne(
+          { idempotency_key: idempotencyKey },
+          {
+            $set: {
+              status: 'failed',
+              error: error_message,
+              failed_at: new Date(),
+              updated_at: new Date(),
+            },
+          }
+        );
+      } catch (logError) {
+        console.warn('⚠️ Failed to update processing log to failed:', logError);
+      }
+    }
   }
 
   // WORKING MEMORY METHODS
@@ -181,63 +224,45 @@ export class MemoryManager {
   async add_semantic_fact(fact: SemanticFact): Promise<string> {
     try {
       const db = get_database();
-      
-      // DEBUG: Log what we're about to insert
-      console.log('🐛 DEBUG: About to store semantic fact:', {
-        collectionName: 'semantic_facts',
-        databaseName: db.databaseName,
-        factContent: fact.content,
-        userId: fact.user_id,
-        hasMetadata: !!fact.metadata
-      });
-      
-      // Prepare the document with proper structure
+
+      // Content-stable dedup: identical (user_id + content) upserts onto the
+      // same document instead of creating duplicates on every extraction cycle.
+      const userId = fact.user_id || 'unknown';
+      const contentHash = stableContentHash(userId, fact.content);
+
       const factDocument = {
         ...fact,
-        created_at: new Date(),
-        _id: undefined // Let MongoDB generate the ID
+        user_id: userId,
+        content_hash: contentHash,
+        updated_at: new Date(),
       };
-      
-      console.log('🐛 DEBUG: Inserting document:', JSON.stringify(factDocument, null, 2));
-      
-      const result = await db.collection('semantic_facts').insertOne(factDocument);
-      
-      console.log('🐛 DEBUG: MongoDB insertOne result:', {
-        insertedCount: result.acknowledged ? 1 : 0,
-        insertedId: result.insertedId?.toString(),
-        acknowledged: result.acknowledged
-      });
-      
-      // Verify the document was actually inserted
-      const verifyCount = await db.collection('semantic_facts').countDocuments();
-      console.log('🐛 DEBUG: Total documents in semantic_facts after insert:', verifyCount);
-      
-      // Also verify we can find the specific document
-      const insertedDoc = await db.collection('semantic_facts').findOne({ 
-        _id: result.insertedId 
-      });
-      console.log('🐛 DEBUG: Can find inserted document?', !!insertedDoc);
-      
-      if (!result.acknowledged) {
-        throw new Error('MongoDB insert not acknowledged - write may have failed');
+
+      const result = await db.collection('semantic_facts').findOneAndUpdate(
+        { content_hash: contentHash },
+        {
+          $set: factDocument,
+          $setOnInsert: { created_at: new Date() },
+          $inc: { extraction_count: 1 },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+
+      const fact_id = result?._id?.toString();
+      if (!fact_id) {
+        throw new Error('Semantic fact upsert returned no document id');
       }
-      
-      const fact_id = result.insertedId.toString();
-      
+
       // BIDIRECTIONAL DATA LINEAGE: Add linkage if source event exists
       if (fact.metadata?.extraction_context?.source_event_id) {
         await this.add_derived_fact_to_event(
-          fact.metadata.extraction_context.source_event_id, 
+          fact.metadata.extraction_context.source_event_id,
           fact_id
         );
       }
-      
-      console.log('✅ DEBUG: Semantic fact stored successfully with ID:', fact_id);
+
       return fact_id;
-      
     } catch (error) {
-      console.error('❌ DEBUG: Failed to store semantic fact:', error);
-      console.error('❌ DEBUG: Fact data:', JSON.stringify(fact, null, 2));
+      console.error('❌ Failed to store semantic fact:', error);
       throw error;
     }
   }

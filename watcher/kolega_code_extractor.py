@@ -297,6 +297,8 @@ def store_session(session: dict, mcp_url: str, api_key: str, user_id: str) -> bo
                         "content": session["transcript"],
                         "category": "event",
                         "user_id": user_id,
+                        "session_id": session["session_id"],
+                        "source": "kolega-code",
                         "tags": [
                             "kolega-code",
                             "conversation",

@@ -91,11 +91,15 @@ class DispatchService {
           const node_data = {
             id: entity.id,
             type: entity.type,
+            user_id: context.user_id,
+            session_id: context.session_id,
             properties: {
               name: entity.name,
               ...entity.properties,
               confidence: entity.confidence,
-              source: 'extraction'
+              source: 'extraction',
+              user_id: context.user_id,
+              session_id: context.session_id
             },
             // Preserve the original event timestamp
             source_event_timestamp: (context as any).source_event_timestamp || context.timestamp,
@@ -130,10 +134,14 @@ class DispatchService {
             from_id: relationship.from_entity_id,
             to_id: relationship.to_entity_id,
             relationship_type: relationship.relationship_type,
+            user_id: context.user_id,
+            session_id: context.session_id,
             properties: {
               ...relationship.properties,
               confidence: relationship.confidence,
-              source: 'extraction'
+              source: 'extraction',
+              user_id: context.user_id,
+              session_id: context.session_id
             },
             created_at: new Date()
           };
@@ -339,11 +347,15 @@ class DispatchService {
           const node_data = {
             id: entity.id,
             type: entity.type,
+            user_id: context.user_id,
+            session_id: context.session_id,
             properties: {
               name: entity.name,
               ...entity.properties,
               confidence: entity.confidence,
-              source: 'extraction'
+              source: 'extraction',
+              user_id: context.user_id,
+              session_id: context.session_id
             },
             // Preserve the original event timestamp
             source_event_timestamp: (context as any).source_event_timestamp || context.timestamp,

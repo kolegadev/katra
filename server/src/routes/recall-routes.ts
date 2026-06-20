@@ -3,6 +3,7 @@ import { queryOrchestrationService } from '../services/query-orchestration-servi
 import { contextSynthesisService } from '../services/context-synthesis-service.js';
 import { escape_regex } from '../utils/regex-escape.js';
 import { z } from 'zod';
+import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
 
 // Request validation schemas
 const RecallRequestSchema = z.object({
@@ -59,7 +60,7 @@ export const create_recall_routes = (): Hono => {
   app.post('/remember', async (c) => {
     try {
       const body = await c.req.json();
-      const { query, sessionId, userId = 'demo-user' } = body;
+      const { query, sessionId, userId = DEFAULT_USER_ID } = body;
       
       if (!query || typeof query !== 'string') {
         return c.json({

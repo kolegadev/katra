@@ -28,3 +28,17 @@ export function generateIdempotencyKey(
 ): string {
   return `${eventData.session_id}_${eventData.event_type}_${contentHash}`;
 }
+
+/**
+ * Content-stable hash for semantic deduplication.
+ *
+ * Unlike generateContentHash (which folds in event_type/session/timestamp and is
+ * therefore event-scoped), this hash depends ONLY on (user_id + normalised
+ * content). Two store_memory calls with identical content for the same user
+ * produce the same hash, enabling upsert-based dedup so re-storing the same
+ * memory updates the existing document instead of creating a duplicate.
+ */
+export function stableContentHash(user_id: string, content: string): string {
+  const normalised = `${user_id}::${content.trim()}`;
+  return crypto.createHash('sha256').update(normalised).digest('hex').substring(0, 16);
+}

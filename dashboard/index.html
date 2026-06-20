@@ -320,20 +320,37 @@
       <section class="tab-content" id="tab-memories">
         <div class="card" style="margin-bottom:20px">
           <div class="card-header"><h3 class="card-title">Search Memories</h3></div>
-          <div class="input-row">
-            <input class="input" id="mem-search-query" placeholder="Search episodic events…" onkeydown="if(event.key==='Enter')searchMemories()">
-            <input class="input" id="mem-search-user" placeholder="user_id" value="kolega-agent" style="max-width:180px">
+          <div class="input-row" style="flex-wrap:wrap">
+            <input class="input" id="mem-search-query" placeholder="Search across memory collections…" onkeydown="if(event.key==='Enter')searchMemories()" style="min-width:220px">
+            <select class="input" id="mem-search-collection" style="max-width:160px">
+              <option value="all">All collections</option>
+              <option value="episodic">Episodic events</option>
+              <option value="semantic">Semantic facts</option>
+              <option value="knowledge_graph">Knowledge graph</option>
+              <option value="asset">Assets</option>
+            </select>
+            <input class="input" id="mem-search-from" type="datetime-local" title="From" style="max-width:180px">
+            <input class="input" id="mem-search-to" type="datetime-local" title="To" style="max-width:180px">
+            <input class="input" id="mem-search-user" placeholder="user_id" style="max-width:160px">
             <input class="input" id="mem-search-limit" placeholder="limit" value="20" style="max-width:70px" type="number" min="1" max="100">
             <button class="btn btn-primary" onclick="searchMemories()" id="mem-search-btn">Search</button>
           </div>
         </div>
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Events</h3>
-            <div class="input-row" style="width:auto">
-              <input class="input" id="mem-filter-user" placeholder="user_id" value="kolega-agent" style="width:160px">
+            <h3 class="card-title">Browse Collection</h3>
+            <div class="input-row" style="width:auto;flex-wrap:wrap">
+              <select class="input" id="mem-filter-collection" style="width:150px" onchange="loadRecentEvents()">
+                <option value="episodic_events">Episodic events</option>
+                <option value="semantic_facts">Semantic facts</option>
+                <option value="knowledge_nodes">Knowledge nodes</option>
+                <option value="knowledge_relationships">Relationships</option>
+              </select>
+              <input class="input" id="mem-filter-from" type="datetime-local" title="From" style="width:180px">
+              <input class="input" id="mem-filter-to" type="datetime-local" title="To" style="width:180px">
+              <input class="input" id="mem-filter-user" placeholder="user_id" style="width:150px">
               <input class="input" id="mem-filter-limit" placeholder="limit" value="20" style="width:70px" type="number" min="1" max="200">
-              <button class="btn btn-secondary btn-sm" onclick="loadRecentEvents()">Recent</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadRecentEvents()">Load</button>
             </div>
           </div>
           <div id="memories-table"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>
@@ -364,8 +381,10 @@
           <div class="card-header">
             <h3 class="card-title">Graph Explorer</h3>
           </div>
-          <div class="input-row">
-            <input class="input" id="graph-query" placeholder="Search graph nodes (e.g. 'machine learning')…" onkeydown="if(event.key==='Enter')loadGraph()">
+          <div class="input-row" style="flex-wrap:wrap">
+            <input class="input" id="graph-query" placeholder="Search graph nodes (e.g. 'machine learning')…" onkeydown="if(event.key==='Enter')loadGraph()" style="min-width:220px">
+            <input class="input" id="graph-user" placeholder="user_id" style="width:150px">
+            <input class="input" id="graph-limit" placeholder="limit" value="100" style="width:80px" type="number" min="1" max="500">
             <button class="btn btn-primary" onclick="loadGraph()">Explore</button>
             <button class="btn btn-secondary" onclick="loadGraphStats()">Stats</button>
             <button class="btn btn-secondary" onclick="buildGraph()" id="build-graph-btn">Build Graph</button>
@@ -615,10 +634,13 @@ async function loadOverview() {
   cards.innerHTML = '<div class="card"><div class="loading-center"><span class="spinner"></span>Loading…</div></div>'.repeat(3);
 
   // Parallel fetches
+  const userId = getCurrentUserId();
+  const statsQuery = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+
   const [infoRes, healthRes, dbRes, bgRes, scopeRes] = await Promise.allSettled([
     apiFetch('/'),
     apiFetch('/api/v1/memory/health'),
-    apiFetch('/api/v1/memory/stats/database'),
+    apiFetch(`/api/v1/memory/stats${statsQuery}`),
     apiFetch('/api/v1/admin/background/status'),
     apiFetch('/api/v1/admin/memory-scope'),
   ]);
@@ -727,26 +749,66 @@ async function loadRecentEvents() {
   const container = document.getElementById('memories-table');
   container.innerHTML = spinner();
 
-  const userId = document.getElementById('mem-filter-user').value || 'kolega-agent';
-  const limit = document.getElementById('mem-filter-limit').value || '20';
+  const userId = document.getElementById('mem-filter-user').value.trim();
+  const limit = document.getElementById('mem-filter-limit').value || '50';
+  const collection = document.getElementById('mem-filter-collection').value;
 
-  // Try episodic events first
-  const { ok, data } = await apiFetch(`/api/v1/memory/episodic/events?user_id=${encodeURIComponent(userId)}&limit=${encodeURIComponent(limit)}`);
+  const fromInput = document.getElementById('mem-filter-from').value;
+  const toInput = document.getElementById('mem-filter-to').value;
 
-  if (ok && (data.results || []).length > 0) {
-    buildEventsTable(data.results, container);
-    return;
+  // Default to the last 30 days when no explicit range is set
+  const to = toInput ? new Date(toInput).toISOString() : new Date().toISOString();
+  const from = fromInput ? new Date(fromInput).toISOString() : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const params = new URLSearchParams();
+  if (userId) params.set('user_id', userId);
+  params.set('from', from);
+  params.set('to', to);
+  params.set('limit', limit);
+
+  if (collection === 'episodic_events') {
+    const { ok, data } = await apiFetch(`/api/v1/memory/episodic/events?${params.toString()}`);
+    if (ok && (data.results || []).length > 0) {
+      buildEventsTable(data.results, container);
+      return;
+    }
+  } else if (collection === 'semantic_facts') {
+    const { ok, data } = await apiFetch(`/api/v1/memory/semantic/facts?${params.toString()}`);
+    if (ok && (data.results || []).length > 0) {
+      buildEventsTable(data.results, container, true);
+      return;
+    }
+  } else if (collection === 'knowledge_nodes') {
+    const { ok, data } = await apiFetch(`/api/v1/memory/knowledge-graph?${params.toString()}`);
+    const nodes = data?.graph_data?.nodes || data?.nodes || [];
+    if (ok && nodes.length > 0) {
+      buildEventsTable(nodes.map(n => ({
+        event_type: n.type || 'node',
+        content: n.properties,
+        timestamp: n.created_at,
+        session_id: n.session_id,
+        user_id: n.user_id,
+        _type: 'node'
+      })), container, true);
+      return;
+    }
+  } else if (collection === 'knowledge_relationships') {
+    const { ok, data } = await apiFetch(`/api/v1/memory/knowledge-graph?${params.toString()}`);
+    const rels = data?.graph_data?.links || data?.relationships || [];
+    if (ok && rels.length > 0) {
+      buildEventsTable(rels.map(r => ({
+        event_type: r.relationship_type || 'relationship',
+        content: { source: r.source || r.from_id, target: r.target || r.to_id, properties: r.properties },
+        timestamp: r.created_at,
+        session_id: r.session_id,
+        user_id: r.user_id,
+        _type: 'relationship'
+      })), container, true);
+      return;
+    }
   }
 
-  // Fall back to semantic facts (distilled knowledge)
-  const { ok: sfOk, data: sfData } = await apiFetch(`/api/v1/memory/semantic/facts?user_id=${encodeURIComponent(userId)}&limit=${encodeURIComponent(limit)}`);
-  if (sfOk && (sfData.results || []).length > 0) {
-    container.innerHTML = `<div style="padding:8px 12px;font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;">No episodic events — showing ${sfData.count} semantic facts for <code>${escapeHtml(userId)}</code></div>`;
-    buildEventsTable(sfData.results, container, true);
-    return;
-  }
-
-  container.innerHTML = emptyMsg(`No memories found for user "${userId}". Try a different user_id or ingest some data.`);
+  container.innerHTML = emptyMsg(`No ${collection.replace(/_/g, ' ')} found${userId ? ` for user "${userId}"` : ''}. Try a different collection, time range, or ingest some data.`);
 }
 
 async function searchMemories() {
@@ -756,8 +818,12 @@ async function searchMemories() {
   btn.disabled = true;
 
   const query = document.getElementById('mem-search-query').value.trim();
-  const userId = document.getElementById('mem-search-user').value || 'kolega-agent';
+  const userId = document.getElementById('mem-search-user').value.trim();
   const limit = parseInt(document.getElementById('mem-search-limit').value) || 20;
+  const collection = document.getElementById('mem-search-collection').value;
+
+  const fromInput = document.getElementById('mem-search-from').value;
+  const toInput = document.getElementById('mem-search-to').value;
 
   if (!query) {
     container.innerHTML = errorMsg('Enter a search query');
@@ -765,10 +831,21 @@ async function searchMemories() {
     return;
   }
 
+  // Map UI collection value to recall search type
+  const searchTypes = collection === 'all'
+    ? ['episodic', 'semantic', 'knowledge_graph', 'asset']
+    : collection === 'knowledge_graph'
+      ? ['knowledge_graph']
+      : [collection];
+
+  const body = { query, userId, limit, searchTypes };
+  if (fromInput) body.startDate = new Date(fromInput).toISOString();
+  if (toInput) body.endDate = new Date(toInput).toISOString();
+
   // Use comprehensive recall search (searches episodic + semantic + knowledge_graph + assets)
   const { ok, data } = await apiFetch('/api/v1/memory/recall/search', {
     method: 'POST',
-    body: { query, userId, limit },
+    body,
   });
 
   btn.disabled = false;
@@ -955,6 +1032,8 @@ async function buildGraph() {
 
 async function loadGraph() {
   const query = document.getElementById('graph-query').value.trim();
+  const userId = document.getElementById('graph-user').value.trim();
+  const limit = parseInt(document.getElementById('graph-limit').value) || 100;
   const footer = document.getElementById('graph-footer');
   const svg = document.getElementById('graph-svg');
   svg.innerHTML = '';
@@ -962,12 +1041,19 @@ async function loadGraph() {
 
   let nodes = [], edges = [];
 
+  const params = new URLSearchParams();
+  if (userId) params.set('user_id', userId);
+  params.set('limit', String(limit));
+
   if (query) {
-    // Query-specific exploration
+    // Query-specific exploration (scoped to user when supported)
     footer.textContent = 'Exploring graph…';
-    const [exploreRes, statsRes] = await Promise.allSettled([
-      apiFetch('/api/v1/memory/enhance/explore', { method: 'POST', body: { query, depth: 2 } }),
-      apiFetch('/api/v1/memory/enhance/stats'),
+    const exploreBody = { query, depth: 2, limit };
+    if (userId) exploreBody.userId = userId;
+
+    const [exploreRes, graphRes] = await Promise.allSettled([
+      apiFetch('/api/v1/memory/enhance/explore', { method: 'POST', body: exploreBody }),
+      apiFetch(`/api/v1/memory/knowledge-graph?${params.toString()}`),
     ]);
 
     if (exploreRes.value?.ok && exploreRes.value.data?.data) {
@@ -977,20 +1063,20 @@ async function loadGraph() {
       }
     }
 
-    if (statsRes.value?.ok && statsRes.value.data?.data) {
-      const s = statsRes.value.data.data;
-      nodes = (s.recent_nodes || []).map(n => ({ id: n.id || n._id, label: n.properties?.name || n.label || n.type || 'node', type: n.type || 'concept', ...n }));
-      edges = (s.top_edges || []).map(e => ({ source: e.from_id || e.source, target: e.to_id || e.target, label: e.relationship_type || e.relationship || e.type || '' }));
-      footer.textContent = `${s.node_count} nodes · ${s.edge_count} edges · Queue: ${s.queue_depth}`;
+    if (graphRes.value?.ok && graphRes.value.data) {
+      const g = graphRes.value.data.graph_data || graphRes.value.data;
+      nodes = (g.nodes || []).map(n => ({ id: n.id || n._id, label: n.properties?.name || n.label || n.type || 'node', type: n.type || 'concept', ...n }));
+      edges = (g.links || g.relationships || []).map(e => ({ source: e.from_id || e.source, target: e.to_id || e.target, label: e.relationship_type || e.relationship || e.type || '' }));
+      footer.textContent = `${nodes.length} nodes · ${edges.length} edges`;
     }
   } else {
-    // No query — load all available graph data
-    const { ok, data } = await apiFetch('/api/v1/memory/enhance/stats');
-    if (ok && data?.data) {
-      const s = data.data;
-      nodes = (s.recent_nodes || []).map(n => ({ id: n.id || n._id, label: n.properties?.name || n.label || n.type || 'node', type: n.type || 'concept', ...n }));
-      edges = (s.top_edges || []).map(e => ({ source: e.from_id || e.source, target: e.to_id || e.target, label: e.relationship_type || e.relationship || e.type || '' }));
-      footer.textContent = `${s.node_count} nodes · ${s.edge_count} edges · Queue: ${s.queue_depth}`;
+    // No query — load scoped knowledge graph data
+    const { ok, data } = await apiFetch(`/api/v1/memory/knowledge-graph?${params.toString()}`);
+    if (ok && data) {
+      const g = data.graph_data || data;
+      nodes = (g.nodes || []).map(n => ({ id: n.id || n._id, label: n.properties?.name || n.label || n.type || 'node', type: n.type || 'concept', ...n }));
+      edges = (g.links || g.relationships || []).map(e => ({ source: e.from_id || e.source, target: e.to_id || e.target, label: e.relationship_type || e.relationship || e.type || '' }));
+      footer.textContent = `${nodes.length} nodes · ${edges.length} edges`;
     }
   }
 
@@ -1295,6 +1381,29 @@ async function loadSettingsConfig() {
 
 let visibleUsers = [];
 
+function applyDefaultUserId(userId) {
+  if (!userId) return;
+  const inputs = [
+    document.getElementById('mem-search-user'),
+    document.getElementById('mem-filter-user'),
+    document.getElementById('graph-user')
+  ];
+  for (const input of inputs) {
+    if (input && !input.value.trim()) {
+      input.value = userId;
+    }
+  }
+}
+
+function getCurrentUserId() {
+  return (
+    document.getElementById('mem-filter-user')?.value.trim() ||
+    document.getElementById('mem-search-user')?.value.trim() ||
+    document.getElementById('graph-user')?.value.trim() ||
+    ''
+  );
+}
+
 async function loadMemoryScope() {
   const container = document.getElementById('scope-content');
   if (!container) return;
@@ -1306,6 +1415,15 @@ async function loadMemoryScope() {
   }
 
   const scope = data.scope;
+
+  // Pre-fill user_id inputs based on scope mode
+  let defaultUserId = '';
+  if (scope.mode === 'shared' && scope.shared_id) {
+    defaultUserId = scope.shared_id;
+  } else if (scope.mode === 'hybrid') {
+    defaultUserId = scope.hybrid_visible_user_ids?.[0] || '';
+  }
+  applyDefaultUserId(defaultUserId);
   const descs = {
     personal: 'Each agent has private memories, isolated by user_id. No sharing.',
     shared: 'All agents with the same shared_id see everything. Communal consciousness.',

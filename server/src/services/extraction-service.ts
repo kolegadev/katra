@@ -100,10 +100,15 @@ class ExtractionService {
       return this.createEmptyExtraction(input_text, context, start_time, 'generic_message');
     }
     
-    // Try lightweight extraction first (fast, no LLM)
+    // Lightweight pattern extraction (fast, no LLM).
     const simpleResult = this.extractSimpleFacts(input_text, context);
-    if (simpleResult.semantic_facts.length > 0) {
-      console.log(`✅ Lightweight extraction: ${simpleResult.semantic_facts.length} facts`);
+    const isSubstantial = input_text.length >= 200;
+
+    // For SHORT messages the lightweight patterns are sufficient — avoid the
+    // expensive LLM call. Only short-circuit here when there is a hit AND the
+    // content is not substantial.
+    if (!isSubstantial && simpleResult.semantic_facts.length > 0) {
+      console.log(`✅ Lightweight extraction (short msg): ${simpleResult.semantic_facts.length} facts`);
       return {
         ...simpleResult,
         processing_metadata: {
@@ -114,12 +119,17 @@ class ExtractionService {
         }
       };
     }
-    
-    // Only call LLM for substantial content that didn't match patterns
-    if (input_text.length < 200) {
+
+    // Short message with no pattern hits — nothing to extract.
+    if (!isSubstantial) {
       console.log(`⏭️ No patterns matched and message is short, skipping LLM extraction`);
       return this.createEmptyExtraction(input_text, context, start_time, 'no_patterns_short');
     }
+
+    // SUBSTANTIAL content (e.g. a full conversation transcript): always run the
+    // LLM distillation. Regex hits (URLs/paths/commands) in a long transcript
+    // are NOT high-signal facts on their own, so we no longer let them bypass
+    // the LLM. Simple facts are merged in afterwards as a supplement.
     
     try {
       const context_string = this.buildContextString(context);
@@ -138,16 +148,25 @@ class ExtractionService {
       }
 
       const extraction_result = this.transformLLMResponse(llm_result, context);
-      
+
+      // Merge in any lightweight pattern facts (URLs/paths/etc.) that the LLM
+      // prompt may not surface, so we don't lose references while distilling.
+      const mergedSemanticFacts = [
+        ...extraction_result.semantic_facts,
+        ...simpleResult.semantic_facts,
+      ];
+
       console.log(`✅ Transformed extraction result:`, {
         entities: extraction_result.entities.length,
         relationships: extraction_result.relationships.length,
         events: extraction_result.events.length,
-        semantic_facts: extraction_result.semantic_facts.length
+        semantic_facts: mergedSemanticFacts.length,
+        llm_used: true
       });
 
       return {
         ...extraction_result,
+        semantic_facts: mergedSemanticFacts,
         processing_metadata: {
           input_length: input_text.length,
           extraction_time: Date.now() - start_time,

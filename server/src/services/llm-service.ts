@@ -228,7 +228,68 @@ export class LLMService {
     const provider = this.getActiveProvider();
     if (!provider) throw new Error('No LLM provider available. Configure via dashboard, MCP configure_llm tool, or env vars.');
 
-    const prompt = this.buildExtractionPrompt(inputText, context);
+    // Chunk large inputs (e.g. full conversation transcripts) so the model can
+    // actually distill them instead of truncating. Each chunk is extracted
+    // independently and the results are merged + deduplicated.
+    const CHUNK_SIZE = 6000;
+    const chunks = inputText.length <= CHUNK_SIZE
+      ? [inputText]
+      : this.chunkText(inputText, CHUNK_SIZE);
+
+    const merged: any = { knowledge: [], entities: [], relationships: [], activities: [] };
+
+    for (const chunk of chunks) {
+      const parsed = await this.extractSingleChunk(provider, chunk, context);
+      if (!parsed) continue;
+      for (const key of ['knowledge', 'entities', 'relationships', 'activities']) {
+        if (Array.isArray(parsed[key])) merged[key].push(...parsed[key]);
+      }
+    }
+
+    // Deduplicate entities by normalised name (keep highest confidence).
+    const seenEntities = new Map<string, any>();
+    for (const e of merged.entities) {
+      const key = String(e.name || '').toLowerCase().trim();
+      if (!key) continue;
+      const prev = seenEntities.get(key);
+      if (!prev || (e.confidence ?? 0) > (prev.confidence ?? 0)) seenEntities.set(key, e);
+    }
+    merged.entities = Array.from(seenEntities.values());
+
+    return merged;
+  }
+
+  /** Split text into <=maxSize chunks on paragraph/sentence boundaries. */
+  private chunkText(text: string, maxSize: number): string[] {
+    const paragraphs = text.split(/\n\n+/);
+    const chunks: string[] = [];
+    let current = '';
+    for (const p of paragraphs) {
+      if ((current + '\n\n' + p).length > maxSize && current) {
+        chunks.push(current);
+        current = '';
+      }
+      if (p.length > maxSize) {
+        // Paragraph itself too long: split on sentences.
+        const sentences = p.split(/(?<=[.!?])\s+/);
+        for (const s of sentences) {
+          if ((current + ' ' + s).length > maxSize && current) {
+            chunks.push(current);
+            current = '';
+          }
+          current = current ? current + ' ' + s : s;
+        }
+      } else {
+        current = current ? current + '\n\n' + p : p;
+      }
+    }
+    if (current) chunks.push(current);
+    return chunks;
+  }
+
+  /** Run the extraction LLM call for a single chunk and parse JSON. */
+  private async extractSingleChunk(provider: any, chunkText: string, context?: string): Promise<any> {
+    const prompt = this.buildExtractionPrompt(chunkText, context);
     let content: string | null = null;
 
     try {
@@ -236,11 +297,11 @@ export class LLMService {
       const response = await client.chat.completions.create({
         model: provider.model,
         messages: [
-          { role: 'system', content: 'You are an expert at extracting structured data from unstructured text. Always respond with valid JSON.' },
+          { role: 'system', content: 'You are a cognitive memory distiller. Always respond with valid JSON only, no prose.' },
           { role: 'user', content: prompt },
         ],
         temperature: 0.1,
-        max_tokens: 2000,
+        max_tokens: 1500,
       });
       const msg = response.choices[0]?.message as any;
       content = msg?.content || msg?.reasoning_content || null;
@@ -263,7 +324,12 @@ export class LLMService {
         .replace(/,\s*}/g, '}')
         .replace(/,\s*]/g, ']')
         .trim();
-      return JSON.parse(cleaned);
+      try {
+        return JSON.parse(cleaned);
+      } catch {
+        console.warn('⚠️ Could not parse LLM extraction JSON, skipping chunk');
+        return null;
+      }
     }
   }
 
@@ -511,94 +577,49 @@ CRITICAL RULES:
   private buildExtractionPrompt(inputText: string, context?: string): string {
     const contextStr = context ? `Context: ${context}\n\n` : '';
 
-    return `${contextStr}You are an advanced cognitive memory extraction system. Extract ALL meaningful information from the text with comprehensive detail and precision.
+    return `${contextStr}You are a cognitive memory distiller. Your job is to compress a conversation into a SMALL set of concise, self-contained, high-signal facts that an AI agent would want to recall later.
 
-Text to analyze: "${inputText}"
+Quality bar (this is the most important part):
+- CONCISE: each fact is one short, self-contained sentence. No paragraphs, no transcripts.
+- DEDUPLICATED: merge related points. If the same idea appears repeatedly, output it ONCE.
+- HIGH-SIGNAL: prefer durable facts (who the user is, what they're building, decisions made, preferences, goals, problems + resolutions). Skip filler, pleasantries, transient status ("loading...", "trying again"), and raw code/commands unless they encode a decision.
+- SELF-CONTAINED: a fact must make sense on its own without the surrounding conversation.
+- HONEST: only state what the text actually supports. Do not invent.
 
-Return structured JSON with comprehensive detail:
+Text to distill:
+"""
+${inputText}
+"""
+
+Return ONLY valid JSON in exactly this shape:
 {
-  "entities": [
-    {
-      "name": "exact name or description from text",
-      "type": "person|object|concept|place|organization|digital|event|temporal|other",
-      "properties": {
-        "description": "comprehensive description based on text",
-        "attributes": "key characteristics or features mentioned",
-        "context": "situational context within the conversation",
-        "significance": "importance or relevance indicated",
-        "status": "current state or condition if mentioned",
-        "temporal_info": "timing, dates, or schedule information",
-        "quantitative_info": "numbers, measurements, or quantities",
-        "user_perspective": "how the user relates to or feels about this",
-        "associated_details": "any additional relevant information"
-      },
-      "confidence": 0.0-1.0
-    }
-  ],
-  "relationships": [
-    {
-      "from_entity": "exact entity name",
-      "to_entity": "exact entity name",
-      "relationship_type": "owns|belongs_to|depends_on|causes|influences|similar_to|part_of|manages|uses|creates|located_at|scheduled_with|related_to",
-      "properties": {
-        "nature": "detailed description of the relationship",
-        "strength": "strong|moderate|weak based on emphasis",
-        "direction": "bidirectional|directional|mutual",
-        "temporal_context": "when this relationship exists or occurred",
-        "conditions": "circumstances or requirements for this relationship",
-        "implications": "what this relationship means or enables"
-      },
-      "confidence": 0.0-1.0
-    }
-  ],
-  "activities": [
-    {
-      "activity_type": "action|plan|process|decision|problem|solution|goal|learning|communication",
-      "description": "detailed description of the activity",
-      "participants": ["entities involved"],
-      "temporal_info": {
-        "timing": "when this occurred or is planned",
-        "duration": "how long it takes or took",
-        "frequency": "how often this occurs",
-        "deadlines": "any time constraints mentioned"
-      },
-      "context": {
-        "motivation": "why this activity is happening",
-        "objective": "what the activity aims to achieve",
-        "current_status": "progress or completion state",
-        "challenges": "difficulties or obstacles mentioned",
-        "resources": "what's needed to complete this",
-        "success_measures": "how success is defined"
-      },
-      "confidence": 0.0-1.0
-    }
-  ],
   "knowledge": [
     {
-      "knowledge_type": "preference|skill|procedure|insight|constraint|goal|principle|opinion|question",
-      "content": "the actual knowledge or information",
-      "domain": "the subject area or field this relates to",
-      "context": "situational context and relevance",
-      "attributes": {
-        "certainty": "certain|likely|uncertain|speculative",
-        "importance": "critical|important|useful|minor",
-        "actionability": "immediate|planned|reference|general",
-        "scope": "personal|professional|general|specific",
-        "stability": "permanent|evolving|situational|experimental",
-        "emotional_context": "positive|negative|neutral|mixed",
-        "expertise_level": "expert|proficient|learning|novice"
-      },
+      "knowledge_type": "preference|skill|procedure|insight|constraint|goal|principle|opinion|fact",
+      "content": "one concise, self-contained sentence",
+      "domain": "short subject area",
       "confidence": 0.0-1.0
     }
+  ],
+  "entities": [
+    { "name": "exact name", "type": "person|project|tool|concept|place|organization|other", "confidence": 0.0-1.0 }
+  ],
+  "relationships": [
+    { "from_entity": "name", "to_entity": "name", "relationship_type": "built|uses|depends_on|manages|part_of|located_at|related_to", "confidence": 0.0-1.0 }
+  ],
+  "activities": [
+    { "activity_type": "goal|decision|problem|solution|plan", "description": "one concise sentence", "confidence": 0.0-1.0 }
   ]
 }
 
-CRITICAL RULES:
-- Extract ONLY information explicitly stated in the text
-- Do not infer, assume, or add details not present
-- Adapt entity types and relationship types to match the actual content domain
-- Preserve exact terminology and phrasing used by the speaker
-- Maintain contextual nuance and emotional undertones`;
+Rules:
+- Output at most 12 knowledge facts. If the text has little durable content, output fewer (or empty arrays). Do not pad.
+- No duplicate or near-duplicate facts.
+- No raw code blocks, no file dumps, no verbatim logs inside facts.
+
+Example input: "I'm building gh-hygiene, a CLI to manage my 120 GitHub repos. I want DeepSeek to decide what to archive. The dashboard keeps showing 'degraded' because Redis won't connect."
+Example output:
+{"knowledge":[{"knowledge_type":"goal","content":"User is building gh-hygiene, a CLI tool to manage ~120 GitHub repos (settings, permissions, cleanup, archiving).","domain":"devtools","confidence":0.95},{"knowledge_type":"preference","content":"User wants DeepSeek V4 Flash as the decision/LLM model for gh-hygiene.","domain":"devtools","confidence":0.9},{"knowledge_type":"problem","content":"Katra dashboard shows 'degraded' status due to Redis not connecting.","domain":"infra","confidence":0.85}],"entities":[{"name":"gh-hygiene","type":"project","confidence":0.95},{"name":"DeepSeek V4 Flash","type":"tool","confidence":0.9},{"name":"Katra","type":"project","confidence":0.85}],"relationships":[{"from_entity":"gh-hygiene","to_entity":"DeepSeek V4 Flash","relationship_type":"uses","confidence":0.9}],"activities":[{"activity_type":"goal","description":"Manage and clean up ~120 GitHub repos via gh-hygiene.","confidence":0.9}]}`;
   }
 
   public async generateChatResponse(

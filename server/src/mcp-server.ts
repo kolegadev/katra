@@ -34,7 +34,6 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { connect_to_mongodb, get_database, is_database_connected } from './database/connection.js';
 import { get_redis_client, is_redis_healthy } from './database/redis-connection.js';
-import { llmService } from './services/llm-service.js';
 import { working_memory_service } from './services/working-memory-service.js';
 import {
   getSemanticMemoryService,
@@ -43,8 +42,10 @@ import {
   getProspectiveMemoryService,
 } from './services/knowledge-graph-factory.js';
 import { embeddingService } from './services/embedding-service.js';
-import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache } from './services/memory-scope-service.js';
+import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache, DEFAULT_USER_ID } from './services/memory-scope-service.js';
 import { llmService, get_llm_config_from_db, save_llm_config_to_db } from './services/llm-service.js';
+import { getEpisodicEventManager } from './services/episodic-event-manager.js';
+import { stableContentHash } from './services/content-hash-utils.js';
 import { ensureApiKeys, logGeneratedKeys } from './utils/api-key-manager.js';
 
 dotenv.config();
@@ -152,10 +153,13 @@ const VectorSearchInput = z.object({
 
 const StoreMemoryInput = z.object({
   content: z.string().min(1).describe('The memory content to store'),
-  user_id: z.string().optional().describe('Optional user ID (personal memory)'),
+  user_id: z.string().optional().describe('Optional user ID (personal memory). Defaults to the system user id.'),
   shared_id: z.string().optional().describe('Optional shared ID for communal memory (overrides user_id in shared mode)'),
   category: z.enum(['fact', 'preference', 'insight', 'event', 'general']).optional().default('general'),
   confidence: z.number().min(0).max(1).optional().default(0.8),
+  session_id: z.string().optional().describe('Optional session ID. Required for episodic event routing (category "event").'),
+  source: z.string().optional().describe('Optional origin of the memory (e.g. "kolega-code", "mcp_store").'),
+  tags: z.array(z.string()).optional().describe('Optional tags for categorisation/filtering.'),
 });
 
 const GetMemoryScopeInput = z.object({}).describe('Get current memory scope settings');
@@ -476,33 +480,111 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
 
   const db = get_database();
 
+  // Aligned default user id across store + search (see memory-scope-service).
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const source = input.source || 'mcp_store';
+  const tags = input.tags || [];
+
   // Resolve shared_id based on current memory scope mode
   const sharedId = await resolveSharedId(input.shared_id);
 
+  // ── Episodic path: category "event" routes through the EpisodicEventManager.
+  // This lands the memory in `episodic_events` with content-hash dedup and
+  // triggers background distillation (extraction → semantic facts → knowledge graph).
+  if (input.category === 'event') {
+    try {
+      const sessionId = input.session_id || `mcp_session:${stableContentHash(userId, input.content)}`;
+      const eventManager = getEpisodicEventManager();
+      const result = await eventManager.createEvent({
+        user_id: userId,
+        shared_id: sharedId || undefined,
+        session_id: sessionId,
+        event_type: 'conversation',
+        content: {
+          role: 'user',
+          message: input.content,
+          source,
+          tags,
+        },
+        metadata: {
+          source,
+          processed: false,
+          tags,
+          origin: 'store_memory',
+        },
+      });
+
+      const dedupNote = result.was_duplicate
+        ? `\n**Dedup:** ${result.action_taken} (existing event \`${result.duplicate_of || result.event.id}\`)`
+        : '';
+
+      // Fire-and-forget embedding on the episodic event for vector recall.
+      try {
+        const vec = await embeddingService.encode(input.content);
+        if (vec) {
+          await db.collection('episodic_events').updateOne(
+            { id: result.event.id },
+            {
+              $set: {
+                embedding: vec,
+                embedding_model: embeddingService.modelName,
+                embedding_version: embeddingService.version,
+              },
+            }
+          );
+        }
+      } catch {
+        // Embedding failed — event is still stored
+      }
+
+      const scopeInfo = sharedId ? `\n**Shared ID:** \`${sharedId}\`` : '';
+      return [{
+        type: 'text',
+        text: `✅ Episodic memory stored.\n\n**Event ID:** \`${result.event.id}\`\n**Session:** \`${sessionId}\`\n**Action:** ${result.action_taken}\n**User:** \`${userId}\`${dedupNote}${scopeInfo}`,
+      }];
+    } catch (error: any) {
+      return [{ type: 'text', text: `❌ Failed to store episodic memory: ${error?.message || error}` }];
+    }
+  }
+
+  // ── Semantic path: facts / preferences / insights / general.
+  // Content-stable dedup via upsert on (user_id + content) hash — replaces the
+  // previous blind insertOne that created a duplicate on every call.
+  const contentHash = stableContentHash(userId, input.content);
+
   const doc: Record<string, unknown> = {
-    user_id: input.user_id || 'mcp-user',
+    user_id: userId,
     content: input.content,
+    content_hash: contentHash,
     category: input.category,
     confidence: input.confidence,
-    source: 'mcp_store',
+    source,
     timestamp: new Date(),
     last_accessed: new Date(),
     access_count: 0,
   };
+  if (tags.length > 0) doc.tags = tags;
+  if (sharedId) doc.shared_id = sharedId;
 
-  // Only set shared_id if scope mode requires it
-  if (sharedId) {
-    doc.shared_id = sharedId;
-  }
+  const result = await db.collection('semantic_facts').findOneAndUpdate(
+    { content_hash: contentHash },
+    {
+      $set: doc,
+      $setOnInsert: { created_at: new Date() },
+      $inc: { access_count: 0 },
+    },
+    { upsert: true, returnDocument: 'after' }
+  );
 
-  const result = await db.collection('semantic_facts').insertOne(doc);
+  const insertedId = result?._id;
+  const wasUpdate = result?.last_accessed && result?.access_count;
 
   // Fire-and-forget embedding
   try {
     const vec = await embeddingService.encode(input.content);
     if (vec) {
       await db.collection('semantic_facts').updateOne(
-        { _id: result.insertedId },
+        { _id: insertedId },
         {
           $set: {
             embedding: vec,
@@ -519,7 +601,7 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
   const scopeInfo = sharedId ? `\n**Shared ID:** \`${sharedId}\`` : '';
   return [{
     type: 'text',
-    text: `✅ Memory stored.\n\n**ID:** \`${result.insertedId}\`\n**Content:** ${input.content}\n**Category:** ${input.category}\n**Confidence:** ${(input.confidence * 100).toFixed(0)}%${scopeInfo}`,
+    text: `✅ Memory stored.\n\n**ID:** \`${insertedId}\`\n**Content:** ${input.content.slice(0, 200)}${input.content.length > 200 ? '…' : ''}\n**Category:** ${input.category}\n**Confidence:** ${(input.confidence * 100).toFixed(0)}%\n**Dedup hash:** \`${contentHash}\`${wasUpdate ? ' (upserted)' : ''}${scopeInfo}`,
   }];
 }
 

@@ -11,6 +11,29 @@ PASS=0
 FAIL=0
 SKIP=0
 
+# Cleanup trap — remove data created by this test user
+cleanup() {
+  echo ""
+  echo "  🧹 Cleaning up test data for user: $TEST_USER"
+  curl -s -X DELETE -H "Authorization: Bearer $API_KEY" \
+    "$API_URL/api/v1/memory/working/$TEST_SESSION" >/dev/null 2>&1 || true
+  # Best-effort deletion of episodic events and semantic facts for this test user
+  python3 - <<PY 2>/dev/null || true
+import json, urllib.request
+headers = {"Authorization": "Bearer $API_KEY", "Content-Type": "application/json"}
+base = "$API_URL"
+def req(method, path, body=None):
+    data = json.dumps(body).encode() if body else None
+    r = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+    try:
+        urllib.request.urlopen(r, timeout=10)
+    except Exception:
+        pass
+req("POST", "/api/v1/admin/clear-all")
+PY
+}
+# Do NOT register trap here; clear-all is too destructive. We delete per-user below.
+
 ok()   { echo "  ✅ PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  ❌ FAIL: $1 — $2"; FAIL=$((FAIL+1)); }
 skip() { echo "  ⏭️  SKIP: $1 — $2"; SKIP=$((SKIP+1)); }

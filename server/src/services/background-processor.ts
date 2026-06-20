@@ -15,6 +15,7 @@ import { getEpisodicEventManager } from './episodic-event-manager.js';
 import { TimeBlockSummarizer } from './time-block-summarizer.js';
 import { ProspectiveMemoryService } from './prospective-memory-service.js';
 import { embeddingService } from './embedding-service.js';
+import { entityResolver } from './entity-resolver.js';
 
 export class BackgroundProcessor {
   private static instance: BackgroundProcessor;
@@ -254,8 +255,8 @@ export class BackgroundProcessor {
     }
 
     // Only proceed if we extracted meaningful information
-    if (extractionResult.entities.length === 0 && 
-        extractionResult.relationships.length === 0 && 
+    if (extractionResult.entities.length === 0 &&
+        extractionResult.relationships.length === 0 &&
         extractionResult.semantic_facts.length === 0) {
       console.log('⏭️ No meaningful semantic information extracted, marking as processed');
       await this.memoryManager.mark_event_processed(eventId, {
@@ -268,6 +269,19 @@ export class BackgroundProcessor {
         }
       });
       return;
+    }
+
+    // Resolve extracted entities to canonical IDs to reduce duplication
+    try {
+      const resolvedCount = await this.resolveExtractedEntities(extractionResult, {
+        userId,
+        sessionId
+      });
+      if (resolvedCount.size > 0) {
+        console.log(`🔗 Entity resolution mapped ${resolvedCount.size} extracted entities to canonical IDs`);
+      }
+    } catch (resolutionError) {
+      console.warn('⚠️ Entity resolution step failed, proceeding with raw extracted IDs:', resolutionError);
     }
 
     // Dispatch to memory stores with session tagging
@@ -372,6 +386,84 @@ export class BackgroundProcessor {
     } catch (e: any) {
       console.warn('⚠️ Failed to embed semantic facts:', e.message);
     }
+  }
+
+  /**
+   * Resolve extracted entities to canonical IDs before dispatch.
+   * Updates entity IDs and relationship references in-place.
+   */
+  private async resolveExtractedEntities(
+    extractionResult: any,
+    context: { userId: string; sessionId: string }
+  ): Promise<Map<string, string>> {
+    const idMapping = new Map<string, string>();
+
+    if (!extractionResult.entities || extractionResult.entities.length === 0) {
+      return idMapping;
+    }
+
+    // Resolve each extracted entity to its canonical form
+    for (const entity of extractionResult.entities) {
+      try {
+        const resolved = await entityResolver.resolveEntity({
+          userId: context.userId,
+          sessionId: context.sessionId,
+          entityText: entity.name,
+          entityType: entity.type,
+          confidence: entity.confidence,
+          contextTerms: entity.properties?.context_terms || entity.properties?.keywords || [],
+          preferredId: entity.id
+        });
+
+        idMapping.set(entity.id, resolved.canonicalId);
+
+        if (resolved.canonicalId !== entity.id) {
+          console.log(`🔗 Entity resolved: "${entity.name}" ${entity.id.slice(-8)} → ${resolved.canonicalId.slice(-8)}`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Entity resolution failed for "${entity.name}", using original ID:`, error);
+        idMapping.set(entity.id, entity.id);
+      }
+    }
+
+    // Rewrite entity IDs to canonical IDs
+    for (const entity of extractionResult.entities) {
+      const canonicalId = idMapping.get(entity.id);
+      if (canonicalId) {
+        entity.id = canonicalId;
+      }
+    }
+
+    // Rewrite relationship references
+    if (extractionResult.relationships) {
+      for (const rel of extractionResult.relationships) {
+        const canonicalFrom = idMapping.get(rel.from_entity_id);
+        const canonicalTo = idMapping.get(rel.to_entity_id);
+        if (canonicalFrom) rel.from_entity_id = canonicalFrom;
+        if (canonicalTo) rel.to_entity_id = canonicalTo;
+      }
+    }
+
+    // Rewrite event entity references
+    if (extractionResult.events) {
+      for (const evt of extractionResult.events) {
+        if (Array.isArray(evt.entities_involved)) {
+          evt.entities_involved = evt.entities_involved.map((id: string) => idMapping.get(id) || id);
+        }
+      }
+    }
+
+    // Rewrite semantic fact source entity references
+    if (extractionResult.semantic_facts) {
+      for (const fact of extractionResult.semantic_facts) {
+        if (fact.properties?.source_entity_id) {
+          const canonical = idMapping.get(fact.properties.source_entity_id);
+          if (canonical) fact.properties.source_entity_id = canonical;
+        }
+      }
+    }
+
+    return idMapping;
   }
 
   /**

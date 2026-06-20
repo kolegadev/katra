@@ -13,6 +13,16 @@ import { get_database } from '../database/connection.js';
 import { escape_regex } from '../utils/regex-escape.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateContentHash, generateIdempotencyKey } from '../services/content-hash-utils.js';
+import { buildScopeFilter, DEFAULT_USER_ID } from '../services/memory-scope-service.js';
+
+const DEBUG_ENDPOINTS_ENABLED = process.env.KATRA_ENABLE_DEBUG_ENDPOINTS === 'true';
+
+function debugDisabledResponse() {
+    return {
+        success: false,
+        error: 'Debug endpoints are disabled. Set KATRA_ENABLE_DEBUG_ENDPOINTS=true to enable.'
+    };
+}
 
 export const create_memory_routes = (): Hono => {
     const router = new Hono();
@@ -464,19 +474,12 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/episodic/events', async (c) => {
         try {
-            const user_id = c.req.query('user_id');
+            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
             const from_str = c.req.query('from');
             const to_str = c.req.query('to');
             const limit = parseInt(c.req.query('limit') || '50');
             const event_type = c.req.query('event_type');
             const role = c.req.query('role') as 'user' | 'assistant' | undefined;
-
-            if (!user_id) {
-                return c.json({
-                    success: false,
-                    error: 'Missing required query parameter: user_id'
-                }, 400);
-            }
 
             const from = from_str ? new Date(from_str) : new Date(Date.now() - 24 * 60 * 60 * 1000);
             const to = to_str ? new Date(to_str) : new Date();
@@ -489,8 +492,9 @@ export const create_memory_routes = (): Hono => {
             }
 
             const db = get_database();
+            const scopeFilter = await buildScopeFilter(user_id);
             const matchCriteria: any = {
-                user_id,
+                ...scopeFilter,
                 timestamp: { $gte: from, $lte: to }
             };
 
@@ -517,7 +521,8 @@ export const create_memory_routes = (): Hono => {
                     event_type: r.event_type,
                     content: r.content,
                     timestamp: r.timestamp,
-                    session_id: r.session_id
+                    session_id: r.session_id,
+                    user_id: r.user_id
                 })),
                 count: results.length,
                 query: {
@@ -790,9 +795,13 @@ export const create_memory_routes = (): Hono => {
      */
     router.post('/demo/complete', async (c) => {
         try {
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
             const body = await c.req.json();
-            const { 
-                user_id = 'demo_user',
+            const {
+                user_id = DEFAULT_USER_ID,
                 session_id = uuidv4(),
                 message = 'Hello, I am interested in learning about machine learning algorithms'
             } = body;
@@ -916,72 +925,36 @@ export const create_memory_routes = (): Hono => {
     // ====== MEMORY STATS ENDPOINT (REQUIRED BY FRONTEND DASHBOARD) ======
 
     /**
-     * Get memory statistics for dashboard (DEBUG VERSION)
+     * Get memory statistics for dashboard
      * GET /api/memory/stats
      */
     router.get('/stats', async (c) => {
         try {
             const db = get_database();
-            const query_params = c.req.query();
-            const user_id_filter = query_params.user_id || 'demo-user';
-            
-            console.log('🔍 Memory stats endpoint called with params:', query_params);
-            
-            // Get both total and filtered collection counts
-            const results: any = {
-                debug_info: {
-                    query_params,
-                    user_filter_applied: user_id_filter,
-                    timestamp: new Date().toISOString()
-                }
-            };
-            
-            // Collection analysis
-            for (const collection of ['semantic_facts', 'episodic_events', 'knowledge_nodes', 'knowledge_relationships', 'working_memory_sessions']) {
+            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
+            const scopeFilter = await buildScopeFilter(user_id);
+
+            console.log('🔍 Memory stats endpoint called for user:', user_id);
+
+            const collections = ['semantic_facts', 'episodic_events', 'knowledge_nodes', 'knowledge_relationships', 'working_memory_sessions'];
+            const counts: any = {};
+
+            for (const collection of collections) {
                 try {
-                    const total = await db.collection(collection).countDocuments();
-                    const demo_user = await db.collection(collection).countDocuments({ user_id: 'demo-user' });
-                    const other_users = total - demo_user;
-                    
-                    // Get sample of user_ids
-                    const user_sample = await db.collection(collection)
-                        .aggregate([
-                            { $group: { _id: "$user_id", count: { $sum: 1 } } },
-                            { $sort: { count: -1 } },
-                            { $limit: 10 }
-                        ])
-                        .toArray();
-                    
-                    results[collection] = {
-                        total: total,
-                        demo_user_only: demo_user,
-                        other_users: other_users,
-                        user_distribution: user_sample
-                    };
-                    
-                    console.log(`📊 ${collection}: Total=${total}, Demo-user=${demo_user}, Others=${other_users}`);
+                    counts[collection] = await db.collection(collection).countDocuments(scopeFilter);
                 } catch (collError: any) {
-                    results[collection] = { error: collError.message };
+                    counts[collection] = 0;
                 }
             }
-            
-            // Legacy API compatibility - return what the frontend expects
-            const [eventCount, nodeCount, factCount] = await Promise.all([
-                db.collection('episodic_events').countDocuments(),
-                db.collection('knowledge_nodes').countDocuments(), 
-                db.collection('semantic_facts').countDocuments()
-            ]);
-            
-            const sessionCount = await db.collection('working_memory').distinct('session_id')
-                .then(arr => arr.length)
-                .catch(() => 0);
 
             return c.json({
                 success: true,
-                total_events: eventCount,
-                total_nodes: nodeCount,
-                total_facts: factCount,
-                total_sessions: sessionCount,
+                user_id,
+                total_events: counts.episodic_events,
+                total_nodes: counts.knowledge_nodes,
+                total_facts: counts.semantic_facts,
+                total_relationships: counts.knowledge_relationships,
+                total_sessions: counts.working_memory_sessions,
                 total_assets: 0,
                 collections_status: {
                     episodic_events: true,
@@ -990,7 +963,7 @@ export const create_memory_routes = (): Hono => {
                     knowledge_relationships: true,
                     working_memory: true
                 },
-                debug_analysis: results
+                counts
             });
         } catch (error: any) {
             console.error('❌ Memory stats retrieval failed:', error);
@@ -1012,8 +985,19 @@ export const create_memory_routes = (): Hono => {
         try {
             const db = get_database();
             const body = await c.req.json();
-            const target_user_id = body.target_user_id || 'demo-user';
-            
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
+            const target_user_id = body.target_user_id;
+
+            if (!target_user_id) {
+                return c.json({
+                    success: false,
+                    error: 'Missing required field: target_user_id'
+                }, 400);
+            }
+
             console.log(`🔧 Starting user_id repair to standardize as: ${target_user_id}`);
             
             const repair_results = {
@@ -1029,12 +1013,9 @@ export const create_memory_routes = (): Hono => {
                 console.log(`🔧 Repairing collection: ${collectionName}`);
                 
                 try {
-                    // Find documents with missing or inconsistent user_id
+                    // Find documents with missing or null user_id only
                     const docs_without_user_id = await db.collection(collectionName).countDocuments({ user_id: { $exists: false } });
                     const docs_with_null_user_id = await db.collection(collectionName).countDocuments({ user_id: null });
-                    const docs_with_different_user_id = await db.collection(collectionName).countDocuments({ 
-                        user_id: { $exists: true, $nin: [null, target_user_id] } 
-                    });
                     
                     let updates_made = 0;
                     
@@ -1058,28 +1039,10 @@ export const create_memory_routes = (): Hono => {
                         console.log(`  ✅ Fixed null user_id in ${result2.modifiedCount} documents`);
                     }
                     
-                    // Update documents with different user_id
-                    if (docs_with_different_user_id > 0) {
-                        const result3 = await db.collection(collectionName).updateMany(
-                            { user_id: { $exists: true, $nin: [null, target_user_id] } },
-                            { $set: { user_id: target_user_id } }
-                        );
-                        updates_made += result3.modifiedCount;
-                        console.log(`  ✅ Standardized user_id in ${result3.modifiedCount} documents`);
-                    }
-                    
-                    // Final count verification
-                    const final_count = await db.collection(collectionName).countDocuments({ user_id: target_user_id });
-                    const total_count = await db.collection(collectionName).countDocuments();
-                    
                     repair_results.collections_updated[collectionName] = {
                         docs_without_user_id: docs_without_user_id,
                         docs_with_null_user_id: docs_with_null_user_id,
-                        docs_with_different_user_id: docs_with_different_user_id,
-                        updates_made: updates_made,
-                        final_target_user_count: final_count,
-                        total_count: total_count,
-                        success: final_count === total_count
+                        updates_made: updates_made
                     };
                     
                     console.log(`📊 ${collectionName}: ${updates_made} updates, final count: ${final_count}/${total_count}`);
@@ -1134,8 +1097,12 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/debug/counts', async (c) => {
         try {
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
             const db = get_database();
-            
+
             console.log('🐛 DEBUG: Collection counts discrepancy analysis started');
             
             const analysis = {
@@ -1325,16 +1292,17 @@ export const create_memory_routes = (): Hono => {
             const user_id = c.req.query('user_id');
             const limit = parseInt(c.req.query('limit') || '100');
 
-            console.log('🔍 Raw user_id from query:', user_id, 'type:', typeof user_id);
-            console.log('🔍 Fetching knowledge graph data for user:', user_id || 'all users');
-            console.log('🔍 DEBUG: Starting to fetch nodes, relationships, and session data...');
+            const effective_user_id = user_id || DEFAULT_USER_ID;
+            const scopeFilter = await buildScopeFilter(effective_user_id);
 
-            // Fetch original nodes and relationships
+            console.log('🔍 Fetching knowledge graph data for user:', effective_user_id);
+
+            // Fetch scoped nodes and relationships
             const [nodes, relationships, episodic_events, working_memory_sessions] = await Promise.all([
-                db.collection('knowledge_nodes').find({}).toArray(),
-                db.collection('knowledge_relationships').find({}).toArray(),
-                db.collection('episodic_events').find({}).toArray(),
-                db.collection('working_memory_sessions').find({}).toArray()
+                db.collection('knowledge_nodes').find(scopeFilter).limit(limit).toArray(),
+                db.collection('knowledge_relationships').find(scopeFilter).limit(limit * 2).toArray(),
+                db.collection('episodic_events').find(scopeFilter).limit(limit * 2).toArray(),
+                db.collection('working_memory_sessions').find(scopeFilter).limit(limit).toArray()
             ]);
 
             // Create a map of session IDs and their associated data
@@ -1781,8 +1749,12 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/debug-nodes', async (c) => {
         try {
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
             const db = get_database();
-            
+
             console.log('🔍 DEBUG: Direct MongoDB test');
             
             // Get total count
@@ -1823,8 +1795,12 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/debug-relationships', async (c) => {
         try {
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
             const db = get_database();
-            
+
             console.log('🔍 DEBUG: Relationships structure test');
             
             // Get total count
@@ -1871,16 +1847,22 @@ export const create_memory_routes = (): Hono => {
      */
     router.post('/create-test-session-data', async (c) => {
         try {
+            if (!DEBUG_ENDPOINTS_ENABLED) {
+                return c.json(debugDisabledResponse(), 403);
+            }
+
             const db = get_database();
-            const session_id = `demo_session_${Date.now()}`;
-            
+            const body = await c.req.json();
+            const user_id = body.user_id || DEFAULT_USER_ID;
+            const session_id = body.session_id || `demo_session_${Date.now()}`;
+
             console.log('🚀 Creating test session data with session_id:', session_id);
             
             // Create test episodic events with session ID
             const events = [
                 {
                     id: `event_${Date.now()}_1`,
-                    user_id: 'demo-user',
+                    user_id,
                     session_id,
                     event_type: 'user_question',
                     content: { message: 'What is machine learning?' },
@@ -1889,7 +1871,7 @@ export const create_memory_routes = (): Hono => {
                 },
                 {
                     id: `event_${Date.now()}_2`,
-                    user_id: 'demo-user',
+                    user_id,
                     session_id,
                     event_type: 'knowledge_extraction',
                     content: { topic: 'machine learning', entities: ['ML', 'algorithms'] },
@@ -1903,7 +1885,8 @@ export const create_memory_routes = (): Hono => {
                 {
                     id: `node_${Date.now()}_1`,
                     type: 'concept',
-                    session_id, // Add session_id to nodes
+                    user_id,
+                    session_id,
                     properties: {
                         name: 'Machine Learning',
                         description: 'A field of artificial intelligence that uses algorithms to learn from data',
@@ -1913,9 +1896,10 @@ export const create_memory_routes = (): Hono => {
                     updated_at: new Date()
                 },
                 {
-                    id: `node_${Date.now()}_2`, 
+                    id: `node_${Date.now()}_2`,
                     type: 'algorithm',
-                    session_id, // Add session_id to nodes
+                    user_id,
+                    session_id,
                     properties: {
                         name: 'Neural Networks',
                         description: 'Computing systems inspired by biological neural networks',
@@ -1943,7 +1927,7 @@ export const create_memory_routes = (): Hono => {
             // Create working memory session
             const sessionContext = {
                 session_id,
-                user_id: 'demo-user',
+                user_id,
                 created_at: new Date(),
                 last_activity: new Date(),
                 variables: {},
@@ -2000,19 +1984,13 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/semantic/facts', async (c) => {
         try {
-            const user_id = c.req.query('user_id');
+            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
             const limit = parseInt(c.req.query('limit') || '50');
-
-            if (!user_id) {
-                return c.json({
-                    success: false,
-                    error: 'Missing required query parameter: user_id'
-                }, 400);
-            }
+            const scopeFilter = await buildScopeFilter(user_id);
 
             const db = get_database();
             const results = await db.collection('semantic_facts')
-                .find({ user_id })
+                .find(scopeFilter)
                 .sort({ created_at: -1, timestamp: -1, confidence: -1 })
                 .limit(limit)
                 .toArray();
