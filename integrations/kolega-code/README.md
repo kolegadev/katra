@@ -17,6 +17,26 @@ uv pip install --python ~/.local/share/uv/tools/kolega-code/bin/python -e .
 ## Configuration
 
 1. Copy or edit `~/Library/Application Support/kolega-code/katra-hook.json`.
+
+   For a shared consciousness setup, set `shared_id` to the same value used by
+   your other agents (e.g., OpenCode) and ensure Katra is running in `shared`
+   or `hybrid` memory scope mode:
+
+   ```json
+   {
+     "mcp_url": "http://localhost:3112/mcp",
+     "api_key": "katra-mcp-key-2026",
+     "user_id": "kolega-agent",
+     "shared_id": "my-team",
+     "enabled": true,
+     "timeout_seconds": 8,
+     "max_context_tokens": 2500,
+     "sources": ["working_memory", "temporal_context", "vector_search", "temporal_recall"],
+     "cache_ttl_seconds": 30,
+     "debug": false
+   }
+   ```
+
 2. Add the hook to `~/Library/Application Support/kolega-code/hooks.json`:
 
 ```json

@@ -306,8 +306,13 @@ curl -X POST http://localhost:3112/mcp \
 
 1. CLI flag: `--shared-id my-team`
 2. Config file (per-platform or global)
-3. Environment variable: `SOLOMEM_SHARED_ID`
+3. Environment variable: `KATRA_SHARED_ID`
 4. Default: empty (personal mode)
+
+**Platform-specific notes:**
+- `katra_watcher.py` reads `shared_id` from the global config or per-platform config.
+- `katra_opencode_extractor.py` accepts `--shared-id` and also respects `KATRA_SHARED_ID`.
+- Kolega Code bridge reads `shared_id` from `~/Library/Application Support/kolega-code/katra-hook.json`.
 
 ---
 
@@ -362,15 +367,16 @@ Add to `~/.claude/mcp.json`:
 
 ### OpenCode
 
-Add to your OpenCode config:
+Add to your OpenCode config (`~/.config/opencode/opencode.jsonc`):
 
-```json
+```jsonc
 {
-  "mcpServers": {
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
     "katra": {
       "type": "remote",
       "url": "http://localhost:3112/mcp",
-      "transport": "sse",
+      "enabled": true,
       "headers": {
         "Authorization": "Bearer YOUR_MCP_API_KEY",
         "Accept": "application/json, text/event-stream"
@@ -380,13 +386,27 @@ Add to your OpenCode config:
 }
 ```
 
-For OpenCode's SQLite sessions, also run the extractor:
+> **Note:** OpenCode uses the top-level `mcp` key with named servers, not `mcpServers`.
+> The `transport` field is not part of the `McpRemoteConfig` schema.
+>
+> If OpenCode fails to start with `ConfigInvalidError`, check that the `mcp`
+> block contains only valid fields: `type`, `url`, `enabled`, `headers`, `oauth`, `timeout`.
+> A backup of the previous config is saved at `~/.config/opencode/opencode.jsonc.bak-*`.
+
+For OpenCode's SQLite sessions, also run the extractor. To join a shared
+consciousness, use the same `shared_id` as your other agents and ensure Katra
+is in `shared` or `hybrid` memory scope mode:
+
 ```bash
 python3 ~/.solomem/opencode_extractor.py --once \
   --mcp-url http://localhost:3112/mcp \
   --api-key YOUR_MCP_API_KEY \
-  --user-id opencode-agent
+  --user-id opencode-agent \
+  --shared-id my-team
 ```
+
+For continuous collection, run the extractor as a background service with the
+same `--shared-id`.
 
 ### Codex CLI (OpenAI)
 
@@ -513,5 +533,5 @@ The Katra server's background processor automatically:
 |----------|---------|-------------|
 | `MCP_URL` | `http://localhost:3112/mcp` | Katra MCP server URL |
 | `MCP_API_KEY` | *(required)* | MCP authentication key |
-| `SOLOMEM_USER_ID` | `<hostname>-agent` | Default user_id for memories |
-| `SOLOMEM_SHARED_ID` | *(empty)* | Shared ID for communal memory |
+| `KATRA_USER_ID` | `<hostname>-agent` | Default user_id for memories |
+| `KATRA_SHARED_ID` | *(empty)* | Shared ID for communal memory |
