@@ -561,7 +561,6 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     source,
     timestamp: new Date(),
     last_accessed: new Date(),
-    access_count: 0,
   };
   if (tags.length > 0) doc.tags = tags;
   if (sharedId) doc.shared_id = sharedId;
@@ -571,7 +570,7 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     {
       $set: doc,
       $setOnInsert: { created_at: new Date() },
-      $inc: { access_count: 0 },
+      $inc: { access_count: 1 },
     },
     { upsert: true, returnDocument: 'after' }
   );
@@ -2030,12 +2029,22 @@ async function startHTTPServer(): Promise<void> {
 
       try {
         if (req.method === 'GET') {
-          // The SDK's StreamableHTTPServerTransport has a bug in the Node.js
-          // adapter where GET SSE streams produce an empty response. Return 405
-          // to signal that we don't support standalone SSE streams. The client
-          // SDK handles 405 gracefully (POST-only mode).
-          res.writeHead(405, { 'Allow': 'POST' });
-          res.end();
+          // Open SSE stream for server-to-client notifications (MCP Streamable
+          // HTTP spec). Some clients (e.g. Claude Code) require a 200 SSE
+          // response to confirm the connection before making POST requests — they
+          // do NOT fall back to POST-only on 405. Since this server uses no
+          // server-to-client push events the stream just sends keepalive pings.
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          });
+          res.write('\n');
+          const keepalive = setInterval(() => {
+            if (!res.destroyed) res.write(': ping\n\n');
+            else clearInterval(keepalive);
+          }, 25000);
+          req.on('close', () => clearInterval(keepalive));
           return;
         }
         if (req.method === 'DELETE') {

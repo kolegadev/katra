@@ -230,8 +230,13 @@ export class MemoryManager {
       const userId = fact.user_id || 'unknown';
       const contentHash = stableContentHash(userId, fact.content);
 
+      // Strip client-supplied timestamp fields to avoid conflict with
+      // $setOnInsert. created_at is set only on insert; updated_at is
+      // always set to now on every update.
+      const { created_at: _created_at, updated_at: _updated_at, ...factData } = fact;
+
       const factDocument = {
-        ...fact,
+        ...factData,
         user_id: userId,
         content_hash: contentHash,
         updated_at: new Date(),

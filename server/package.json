@@ -34,7 +34,7 @@
   },
   "overrides": {
     "protobufjs": "^7.5.5",
-    "flatbuffers": "^2.0.8"
+    "flatbuffers": "^24.3.25"
   },
   "license": "MIT"
 }
