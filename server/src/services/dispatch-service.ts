@@ -686,9 +686,12 @@ class DispatchService {
         const entity_operations = extraction_result.entities.map(entity => ({
           id: entity.id,
           type: entity.type,
+          user_id: context.user_id,
+          session_id: context.session_id,
           properties: {
             name: entity.name,
             ...entity.properties,
+            user_id: context.user_id,
             session_id: context.session_id,
             discovered_at: context.timestamp.toISOString(),
             confidence: entity.confidence,
