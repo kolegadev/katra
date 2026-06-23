@@ -219,6 +219,7 @@ class MemoryConsolidator {
    * Get all episodic events for a user
    */
   private async getUserEpisodicEvents(userId: string): Promise<EpisodicEvent[]> {
+    if (!userId) throw new Error('getUserEpisodicEvents: userId is required');
     const db = get_database();
     const events = await db.collection('episodic_events')
       .find({ user_id: userId })
@@ -231,6 +232,7 @@ class MemoryConsolidator {
    * Get all semantic facts for a user
    */
   private async getUserSemanticFacts(userId: string): Promise<SemanticFact[]> {
+    if (!userId) throw new Error('getUserSemanticFacts: userId is required');
     const db = get_database();
     const facts = await db.collection('semantic_facts')
       .find({ user_id: userId })
@@ -243,9 +245,10 @@ class MemoryConsolidator {
    * Get all knowledge nodes for a user
    */
   private async getUserKnowledgeNodes(userId: string): Promise<KnowledgeNode[]> {
+    if (!userId) throw new Error('getUserKnowledgeNodes: userId is required');
     const db = get_database();
     const nodes = await db.collection('knowledge_nodes')
-      .find({ 'properties.user_id': userId })
+      .find({ user_id: userId })
       .sort({ updated_at: -1 })
       .toArray();
     return nodes as unknown as KnowledgeNode[];
