@@ -184,14 +184,14 @@ Start with { and end with }. Nothing before or after.`;
    * Return all nodes for a user (for diagnostic / dashboard use).
    */
   public async getAllNodes(): Promise<MemoryNode[]> {
-    return this.db.collection('memory_nodes').find({}).sort({ updated_at: -1 }).limit(100).toArray() as Promise<MemoryNode[]>;
+    return this.db.collection('knowledge_nodes').find({}).sort({ updated_at: -1 }).limit(100).toArray() as Promise<MemoryNode[]>;
   }
 
   /**
    * Return top edges by weight for a user.
    */
   public async getTopEdges(limit: number = 50): Promise<MemoryEdge[]> {
-    return this.db.collection('memory_edges').find({})
+    return this.db.collection('knowledge_relationships').find({})
       .sort({ weight: -1 })
       .limit(limit)
       .toArray() as Promise<MemoryEdge[]>;

@@ -301,7 +301,7 @@ export class LLMService {
           { role: 'user', content: prompt },
         ],
         temperature: 0.1,
-        max_tokens: 1500,
+        max_tokens: 200,  // 1-2 sentences = ~100 tokens max
       });
       const msg = response.choices[0]?.message as any;
       content = msg?.content || msg?.reasoning_content || null;
@@ -577,49 +577,24 @@ CRITICAL RULES:
   private buildExtractionPrompt(inputText: string, context?: string): string {
     const contextStr = context ? `Context: ${context}\n\n` : '';
 
-    return `${contextStr}You are a cognitive memory distiller. Your job is to compress a conversation into a SMALL set of concise, self-contained, high-signal facts that an AI agent would want to recall later.
+    return `${contextStr}Distill this text into at most 2 durable one-sentence facts an AI agent should remember. Return ONLY JSON.
 
-Quality bar (this is the most important part):
-- CONCISE: each fact is one short, self-contained sentence. No paragraphs, no transcripts.
-- DEDUPLICATED: merge related points. If the same idea appears repeatedly, output it ONCE.
-- HIGH-SIGNAL: prefer durable facts (who the user is, what they're building, decisions made, preferences, goals, problems + resolutions). Skip filler, pleasantries, transient status ("loading...", "trying again"), and raw code/commands unless they encode a decision.
-- SELF-CONTAINED: a fact must make sense on its own without the surrounding conversation.
-- HONEST: only state what the text actually supports. Do not invent.
+Rules:
+- Output at MOST 2 facts as short, self-contained sentences. If nothing is durable, return {"facts":[]}.
+- Keep: decisions, preferences, goals, problems and their resolutions, things built or changed, user identity/preferences.
+- Skip: small talk, greetings, questions, filler, "loading…", transient status, raw code, file paths, URLs.
+- Merge: if the same idea appears twice, output it once.
+- Be honest: only state what the text actually says. Never invent.
 
-Text to distill:
+Text:
 """
 ${inputText}
 """
 
-Return ONLY valid JSON in exactly this shape:
-{
-  "knowledge": [
-    {
-      "knowledge_type": "preference|skill|procedure|insight|constraint|goal|principle|opinion|fact",
-      "content": "one concise, self-contained sentence",
-      "domain": "short subject area",
-      "confidence": 0.0-1.0
-    }
-  ],
-  "entities": [
-    { "name": "exact name", "type": "person|project|tool|concept|place|organization|other", "confidence": 0.0-1.0 }
-  ],
-  "relationships": [
-    { "from_entity": "name", "to_entity": "name", "relationship_type": "built|uses|depends_on|manages|part_of|located_at|related_to", "confidence": 0.0-1.0 }
-  ],
-  "activities": [
-    { "activity_type": "goal|decision|problem|solution|plan", "description": "one concise sentence", "confidence": 0.0-1.0 }
-  ]
-}
+Return ONLY valid JSON: {"facts":["one sentence","another sentence"]}
 
-Rules:
-- Output at most 12 knowledge facts. If the text has little durable content, output fewer (or empty arrays). Do not pad.
-- No duplicate or near-duplicate facts.
-- No raw code blocks, no file dumps, no verbatim logs inside facts.
-
-Example input: "I'm building gh-hygiene, a CLI to manage my 120 GitHub repos. I want DeepSeek to decide what to archive. The dashboard keeps showing 'degraded' because Redis won't connect."
-Example output:
-{"knowledge":[{"knowledge_type":"goal","content":"User is building gh-hygiene, a CLI tool to manage ~120 GitHub repos (settings, permissions, cleanup, archiving).","domain":"devtools","confidence":0.95},{"knowledge_type":"preference","content":"User wants DeepSeek V4 Flash as the decision/LLM model for gh-hygiene.","domain":"devtools","confidence":0.9},{"knowledge_type":"problem","content":"Katra dashboard shows 'degraded' status due to Redis not connecting.","domain":"infra","confidence":0.85}],"entities":[{"name":"gh-hygiene","type":"project","confidence":0.95},{"name":"DeepSeek V4 Flash","type":"tool","confidence":0.9},{"name":"Katra","type":"project","confidence":0.85}],"relationships":[{"from_entity":"gh-hygiene","to_entity":"DeepSeek V4 Flash","relationship_type":"uses","confidence":0.9}],"activities":[{"activity_type":"goal","description":"Manage and clean up ~120 GitHub repos via gh-hygiene.","confidence":0.9}]}`;
+Example — Text: "I finished the port to PostgreSQL and the query latency dropped from 800ms to 45ms. Next I want to add connection pooling."
+Example — Output: {"facts":["Completed PostgreSQL migration with query latency improvement from 800ms to 45ms.","Next step is adding connection pooling to the database layer."]}`;
   }
 
   public async generateChatResponse(

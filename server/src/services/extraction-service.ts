@@ -484,116 +484,29 @@ class ExtractionService {
   }
 
   private transformLLMResponse(llm_result: any, context: ExtractionContext): Omit<ExtractionResult, 'processing_metadata'> {
-    const timestamp = context.timestamp;
-    
-    // Transform entities
-    const entities: ExtractedEntity[] = (llm_result.entities || []).map((entity: any) => ({
+    // Optimised: only 1-2 facts per turn. No entities, relationships, or activities.
+    // Activities were the feedback-loop vector — extracted problems/solutions were
+    // stored back as episodic_events and re-ingested endlessly.
+    const semantic_facts: ExtractedSemanticFact[] = (llm_result.facts || []).map((fact: string) => ({
       id: uuidv4(),
-      type: entity.type || 'general',
-      name: entity.name || 'unnamed',
+      fact_key: 'distilled_fact',
+      fact_value: fact,
+      context: `Distilled from session ${context.session_id}`,
+      confidence: 0.85,
+      fact_type: 'insight',
       properties: {
-        ...entity.properties,
-        session_id: context.session_id,
-        discovered_at: timestamp.toISOString()
-      },
-      confidence: entity.confidence || 0.7
-    }));
-
-    // Create entity name to ID mapping for relationships
-    const entityMap = new Map(entities.map(e => [e.name, e.id]));
-
-    // Transform relationships
-    const relationships: ExtractedRelationship[] = (llm_result.relationships || []).map((rel: any) => {
-      const from_id = entityMap.get(rel.from_entity) || uuidv4();
-      const to_id = entityMap.get(rel.to_entity) || uuidv4();
-      
-      return {
-        id: uuidv4(),
-        from_entity_id: from_id,
-        to_entity_id: to_id,
-        relationship_type: rel.relationship_type || 'related_to',
-        properties: {
-          ...rel.properties,
-          session_id: context.session_id,
-          created_at: timestamp.toISOString()
-        },
-        confidence: rel.confidence || 0.7
-      };
-    });
-
-    // Transform activities into events
-    const events: ExtractedEvent[] = (llm_result.activities || []).map((activity: any) => {
-      const involved_entity_ids = entities
-        .filter(e => activity.participants?.includes(e.name))
-        .map(e => e.id);
-
-      return {
-        id: uuidv4(),
-        event_type: activity.activity_type || 'general',
-        timestamp: timestamp,
-        description: activity.description || '',
-        entities_involved: involved_entity_ids,
-        metadata: {
-          ...activity.context,
-          session_id: context.session_id,
-          user_id: context.user_id,
-          temporal_info: activity.temporal_info,
-          extracted_at: timestamp.toISOString()
-        },
-        confidence: activity.confidence || 0.7
-      };
-    });
-
-    // Transform knowledge into semantic facts
-    const semantic_facts: ExtractedSemanticFact[] = (llm_result.knowledge || []).map((knowledge: any) => ({
-      id: uuidv4(),
-      fact_key: knowledge.knowledge_type || 'general_knowledge',
-      fact_value: knowledge.content,
-      context: knowledge.context || `Extracted from session ${context.session_id}`,
-      confidence: knowledge.confidence || 0.7,
-      fact_type: knowledge.knowledge_type || 'general',
-      properties: {
-        certainty_level: knowledge.attributes?.certainty || 'likely',
-        importance: knowledge.attributes?.importance || 'useful',
-        actionability: knowledge.attributes?.actionability || 'reference',
-        emotional_weight: knowledge.attributes?.emotional_context || 'neutral',
-        expertise_level: knowledge.attributes?.expertise_level || 'general',
-        change_frequency: knowledge.attributes?.stability || 'static',
-        sharing_context: knowledge.attributes?.scope || 'personal',
-        domain: knowledge.domain,
-        original_content: knowledge.content
+        certainty_level: 'likely',
+        importance: 'high',
+        actionability: 'reference',
+        extraction_method: 'llm_distill'
       }
     }));
-
-    // Also create semantic facts from simple entities if they represent facts
-    entities.forEach(entity => {
-      if (entity.type === 'concept' || entity.type === 'preference' || entity.type === 'skill') {
-        semantic_facts.push({
-          id: uuidv4(),
-          fact_key: `entity_${entity.type}`,
-          fact_value: entity.name,
-          context: `Entity extracted from user input: ${entity.name}`,
-          confidence: entity.confidence,
-          fact_type: entity.type,
-          properties: {
-            certainty_level: 'stated',
-            importance: 'useful',
-            actionability: 'reference',
-            emotional_weight: 'neutral',
-            expertise_level: 'general',
-            change_frequency: 'static',
-            sharing_context: 'personal',
-            source_entity_id: entity.id
-          }
-        });
-      }
-    });
 
     return {
-      entities,
-      relationships,
-      events,
-      semantic_facts
+      entities: [],
+      relationships: [],
+      events: [],          // ← No extracted events → no feedback loop
+      semantic_facts,
     };
   }
 

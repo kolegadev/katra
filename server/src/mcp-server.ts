@@ -631,8 +631,6 @@ async function handleSearchMemories(args: unknown): Promise<TextContent[]> {
     { name: 'agent_journal_auto',  label: 'Journal (Auto)',   contentPath: 'content' },
     { name: 'knowledge_nodes',     label: 'Knowledge Graph',  contentPath: 'title' },
     { name: 'knowledge_relationships', label: 'Relationships',  contentPath: 'relationship_type' },
-    { name: 'memory_nodes',        label: 'Memory Nodes',    contentPath: 'label' },
-    { name: 'memory_edges',        label: 'Memory Edges',    contentPath: 'label' },
     { name: 'memory_missions',     label: 'Missions',    contentPath: 'title' },
     { name: 'asset_metadata',      label: 'Assets',     contentPath: 'filename' },
     { name: 'working_memory_sessions', label: 'Working Memory', contentPath: 'summary' },
@@ -698,12 +696,44 @@ async function handleSearchMemories(args: unknown): Promise<TextContent[]> {
     const contentField = col.contentPath;
 
     try {
-      // Try  index first
+      // MongoDB $text cannot be combined with top-level $or/$and in the same query.
+      // Apply non-conflicting filters inline and $or/$and as post-filter.
+      const textQuery: any = { $text: { $search: input.query } };
+      let hasPostFilter = false;
+      for (const [key, value] of Object.entries(baseFilter)) {
+        if (key !== '$or' && key !== '$and') {
+          textQuery[key] = value;
+        } else {
+          hasPostFilter = true;
+        }
+      }
+
       docs = await db.collection(col.name)
-        .find({ ...baseFilter, $text: { $search: input.query } })
+        .find(textQuery)
         .sort({ timestamp: -1 } as any)
-        .limit(limit)
+        .limit(hasPostFilter ? limit * 3 : limit)
         .toArray();
+
+      // Post-filter by $or/$and if present
+      if (hasPostFilter) {
+        const orClauses = baseFilter.$or;
+        const andClauses = baseFilter.$and;
+        docs = docs.filter((doc: any) => {
+          if (andClauses) {
+            if (!andClauses.every((clause: any) =>
+              Object.entries(clause).every(([k, v]) => doc[k] === v))) {
+              return false;
+            }
+          }
+          if (orClauses) {
+            if (!orClauses.some((clause: any) =>
+              Object.entries(clause).every(([k, v]) => doc[k] === v))) {
+              return false;
+            }
+          }
+          return true;
+        });
+      }
     } catch {
       // Fall back to regex on content field + title/name fields
       const regexFilter: Record<string, unknown> = { ...baseFilter };
@@ -1974,6 +2004,24 @@ function registerHandlers(server: Server) {
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
 async function startHTTPServer(): Promise<void> {
+  // Pre-create and connect a default session server before the HTTP server
+  // starts accepting connections. This pays the connect() cost upfront while
+  // the event loop is free, preventing "Server not initialized" errors when
+  // the background processor is consuming CPU.
+  let defaultTransport: StreamableHTTPServerTransport | undefined;
+  
+  // Eager init: create and await connect() now so it's ready before listen()
+  const preServer = createMCPServer();
+  registerHandlers(preServer);
+  defaultTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+  defaultTransport.onerror = (err) => {
+    console.error('MCP transport error:', err.message);
+  };
+  await preServer.connect(defaultTransport);
+  defaultTransport.onclose = () => {
+    if (defaultTransport!.sessionId) transports.delete(defaultTransport!.sessionId);
+  };
+  
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (!validateAuth(req)) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -2011,20 +2059,27 @@ async function startHTTPServer(): Promise<void> {
       if (sessionId) transport = transports.get(sessionId);
       
       if (!transport) {
-        transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
-        transport.onerror = (err) => {
-          console.error('MCP transport error:', err.message);
-        };
-        // Create a new Server instance per transport — the SDK's Server class
-        // only allows one transport connection at a time.
-        const sessionServer = createMCPServer();
-        registerHandlers(sessionServer);
-        await sessionServer.connect(transport);
-        transport.onclose = () => {
-          if (transport!.sessionId) transports.delete(transport!.sessionId);
-        };
-        // Store after connect — sessionId is still undefined here, will be set
-        // during handleRequest. We'll re-store with the real ID after the request.
+        // Use the pre-created default transport if available (already connected,
+        // so no event-loop-dependent await needed). After consuming it, the next
+        // request without a sessionId will create a fresh one via ensureDefault.
+        if (defaultTransport) {
+          transport = defaultTransport;
+          defaultTransport = undefined;
+        } else {
+          // Fallback: create fresh if default was already consumed and not yet
+          // replenished. This path may hit "Server not initialized" under CPU
+          // pressure, but ensureDefaultTransport replenishes on next request.
+          transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+          transport.onerror = (err) => {
+            console.error('MCP transport error:', err.message);
+          };
+          const sessionServer = createMCPServer();
+          registerHandlers(sessionServer);
+          await sessionServer.connect(transport);
+          transport.onclose = () => {
+            if (transport!.sessionId) transports.delete(transport!.sessionId);
+          };
+        }
       }
 
       try {
@@ -2072,6 +2127,8 @@ async function startHTTPServer(): Promise<void> {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found', endpoints: ['/mcp', '/health'] }));
   });
+
+  // Default transport is already connected — start accepting connections
 
   httpServer.listen(getMcpPort(), getMcpHost(), () => {
     console.error(`🚀 Katra MCP Server v3.0 running on http://${getMcpHost()}:${getMcpPort()}`);

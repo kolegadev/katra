@@ -6,6 +6,7 @@
 import { get_database } from '../database/connection.js';
 import { ObjectId } from 'mongodb';
 import { generateContentHash, generateIdempotencyKey, stableContentHash } from './content-hash-utils.js';
+import { embeddingService } from './embedding-service.js';
 import type { 
   EpisodicEvent, 
   KnowledgeNode, 
@@ -229,6 +230,47 @@ export class MemoryManager {
       // same document instead of creating duplicates on every extraction cycle.
       const userId = fact.user_id || 'unknown';
       const contentHash = stableContentHash(userId, fact.content);
+
+      // Semantic dedup: check for near-duplicate facts via embedding similarity.
+      // The content-hash catches exact duplicates only, but the LLM extraction
+      // often rephrases the same fact slightly differently across cycles.
+      // This prevents near-duplicate proliferation.
+      try {
+        if (embeddingService.isReady) {
+          const factEmbedding = await embeddingService.encode(fact.content, 'semantic_fact');
+          if (factEmbedding && factEmbedding.length > 0) {
+            const recentFacts = await db.collection('semantic_facts')
+              .find({
+                user_id: userId,
+                embedding: { $exists: true },
+              })
+              .sort({ created_at: -1 })
+              .limit(20)
+              .toArray();
+
+            for (const existing of recentFacts) {
+              if (existing.embedding?.length === factEmbedding.length) {
+                const similarity = embeddingService.cosineSimilarity(factEmbedding, existing.embedding);
+                if (similarity > 0.92) {
+                  // Near-duplicate found — bump extraction count on existing
+                  await db.collection('semantic_facts').updateOne(
+                    { _id: existing._id },
+                    {
+                      $set: { updated_at: new Date() },
+                      $inc: { extraction_count: 1 },
+                      $max: { confidence: fact.confidence || 0 },
+                    }
+                  );
+                  console.log(`🔗 Merged near-duplicate (sim ${similarity.toFixed(3)}): "${fact.content.substring(0, 60)}..."`);
+                  return existing._id.toString();
+                }
+              }
+            }
+          }
+        }
+      } catch (dedupError) {
+        // Non-critical — fall through to normal upsert if embedding check fails
+      }
 
       // Strip client-supplied timestamp fields to avoid conflict with
       // $setOnInsert. created_at is set only on insert; updated_at is
@@ -638,6 +680,17 @@ export class MemoryManager {
   // Background Processing Support
   async get_unprocessed_events(limit: number = 50): Promise<EpisodicEvent[]> {
     const db = get_database();
+    
+    // Exclude derived/meta event types that are LLM extraction outputs,
+    // not genuine user/agent conversation. Re-ingesting them creates a
+    // feedback loop where extracted activities generate new episodic events.
+    const DERIVED_EVENT_TYPES = [
+      'problem', 'solution', 'goal', 'decision',
+      'plan', 'insight', 'task'
+      // NOTE: 'general' is NOT excluded — it's the default
+      // category for user/agent store_memory() calls.
+    ];
+    
     const events = await db.collection('episodic_events')
       .find({ 
         'metadata.processed': { $ne: true },
@@ -646,6 +699,7 @@ export class MemoryManager {
         content_hash: { $exists: true, $ne: null },
         user_id: { $exists: true, $ne: null },
         session_id: { $exists: true, $ne: null },
+        event_type: { $nin: DERIVED_EVENT_TYPES },
       })
       .sort({ timestamp: 1 })
       .limit(limit)
@@ -682,8 +736,56 @@ export class MemoryManager {
   }
 
   async get_connected_nodes(node_id: string, max_depth: number = 2): Promise<any[]> {
-    console.log(`🔗 Getting connected nodes for ${node_id}, depth ${max_depth} (stub implementation)`);
-    return [];
+    const db = get_database();
+    const visited = new Set<string>([node_id]);
+    let frontier = [node_id];
+    const results: any[] = [];
+
+    for (let depth = 0; depth < max_depth; depth++) {
+      if (frontier.length === 0) break;
+
+      const relationships = await db.collection('knowledge_relationships')
+        .find({
+          $or: [
+            { from_node_id: { $in: frontier } },
+            { to_node_id: { $in: frontier } },
+          ],
+        })
+        .limit(50)
+        .toArray();
+
+      const nextIds: string[] = [];
+      for (const rel of relationships) {
+        const sourceInFrontier = frontier.includes(rel.from_node_id);
+        const targetId = sourceInFrontier ? rel.to_node_id : rel.from_node_id;
+        if (!visited.has(targetId)) {
+          visited.add(targetId);
+          nextIds.push(targetId);
+        }
+        results.push({ ...rel, depth: depth + 1 });
+      }
+
+      // Fetch node documents for the next level
+      if (nextIds.length > 0) {
+        const nodes = await db.collection('knowledge_nodes')
+          .find({ id: { $in: nextIds } })
+          .limit(30)
+          .toArray();
+        for (const node of nodes) {
+          results.push({ ...node, depth: depth + 1 });
+        }
+      }
+
+      frontier = nextIds;
+    }
+
+    // Also include the starting node
+    const startNode = await db.collection('knowledge_nodes').findOne({ id: node_id });
+    if (startNode) {
+      results.unshift({ ...startNode, depth: 0 });
+    }
+
+    return results;
   }
 
   // System Health and Statistics
