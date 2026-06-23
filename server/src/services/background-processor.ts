@@ -362,7 +362,7 @@ export class BackgroundProcessor {
       const facts = await db.collection('semantic_facts')
         .find({
           user_id: userId,
-          'metadata.extraction_context.source_event_id': eventId,
+          'metadata.source_event_id': eventId,
           embedding: { $exists: false },
         })
         .limit(20)

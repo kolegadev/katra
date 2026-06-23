@@ -832,8 +832,6 @@ class DispatchService {
           const fact_results = await Promise.all(
             extraction_result.semantic_facts.map(async (fact, index) => {
               try {
-                console.log(`🐛 DEBUG: Processing semantic fact ${index + 1}/${extraction_result.semantic_facts.length}`);
-
                 const fact_data = {
                   user_id: context.user_id,
                   content: `${fact.fact_key}: ${fact.fact_value}`,
@@ -844,7 +842,6 @@ class DispatchService {
                     fact_value: fact.fact_value,
                     context: fact.context,
                     session_id: context.session_id,
-                    // Enhanced metadata for better debugging
                     extraction_timestamp: new Date().toISOString(),
                     source_event_id: context.source_event_id,
                     batch_id: context.batch_id
@@ -852,11 +849,7 @@ class DispatchService {
                   created_at: new Date()
                 };
 
-                console.log(`🐛 DEBUG: Fact data structure:`, JSON.stringify(fact_data, null, 2));
-
                 const fact_id = await this.memory_manager.add_semantic_fact(fact_data);
-
-                console.log(`✅ DEBUG: Semantic fact stored with ID: ${fact_id}`);
                 return { success: true, fact_id, error: null };
 
               } catch (error) {

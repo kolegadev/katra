@@ -81,12 +81,17 @@ export class EmbeddingService {
     if (this.initializing) {
       // Wait for initialization to complete
       let attempts = 0;
-      while (this.initializing && attempts < 50) {
+      while (this.initializing && attempts < 100) {
         await new Promise(r => setTimeout(r, 100));
         attempts++;
       }
       return this.modelLoaded && !!this.model;
     }
+
+    // Claim the initialization slot immediately, before any await, to prevent
+    // concurrent callers from also entering the load path. All awaits below run
+    // with this.initializing = true, so latecomers hit the wait loop above.
+    this.initializing = true;
 
     // Pre-flight: detect musl/Alpine environments where ONNX runtime will fatal-error.
     // The .node binary needs glibc which doesn't exist on Alpine/musl.
@@ -112,8 +117,6 @@ export class EmbeddingService {
     } catch {
       // Non-fatal — proceed to try loading anyway
     }
-
-    this.initializing = true;
     try {
       console.log('🧠 Loading embedding model:', MODEL_NAME);
       const { pipeline } = await import('@xenova/transformers');

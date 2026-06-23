@@ -128,7 +128,7 @@ async function initializeServices(): Promise<void> {
 
   // Pre-warm embedding model (lazy init, non-blocking)
   try {
-    await embeddingService.encode('warmup');
+    await embeddingService.encode('warming up the semantic embedding model for production inference');
     console.error('  ✅ Embedding service ready');
   } catch {
     console.error('  ⚠️ Embedding service unavailable (Alpine/musl?) — keyword search only');
