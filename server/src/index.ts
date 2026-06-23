@@ -18,6 +18,7 @@ import { llmService } from './services/llm-service.js';
 import { get_llm_config_from_db } from './services/llm-service.js';
 import { embeddingService } from './services/embedding-service.js';
 import { BackgroundProcessor } from './services/background-processor.js';
+import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
 
 // Routes
 import { create_memory_routes } from './routes/memory-routes.js';
@@ -28,6 +29,7 @@ import { create_assets_routes } from './routes/asset-routes.js';
 import { create_diagnostic_routes } from './routes/health-routes.js';
 import { create_admin_routes } from './routes/admin-routes.js';
 import { create_tenant_routes } from './routes/tenant-routes.js';
+import { create_reflection_routes } from './routes/reflection-routes.js';
 
 // MCP server
 import { startMcpServer } from './mcp-server.js';
@@ -79,6 +81,14 @@ async function main() {
   // Start background processor
   const bgProcessor = BackgroundProcessor.get_instance();
   bgProcessor.start(30000); // 30 second interval
+
+  // Start sleep consolidation service
+  const sleepService = SleepConsolidationService.get_instance();
+  sleepService.schedule({
+    daily:  { hour: 2, minute: 0 },            // 2:00 AM daily
+    weekly: { dayOfWeek: 0, hour: 3, minute: 0 },  // Sunday 3:00 AM
+    monthly:{ dayOfMonth: 1, hour: 4, minute: 0 }, // 1st of month 4:00 AM
+  });
 
   // ── REST API Server (Hono) ──
   const app = new Hono();
@@ -151,6 +161,7 @@ async function main() {
   app.route('/api/v1/memory/enhance', create_knowledge_graph_routes());
   app.route('/api/v1/assets', create_assets_routes());
   app.route('/api/v1/admin', create_admin_routes());
+  app.route('/api/v1/reflection', create_reflection_routes());
 
   // Tenant management (multi-tenant mode only)
   if (isMultiTenant()) {
@@ -192,6 +203,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down...`);
     bgProcessor.stop();
+    sleepService.stop();
     await close_redis_connection();
     process.exit(0);
   };

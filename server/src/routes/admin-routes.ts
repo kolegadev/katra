@@ -9,8 +9,15 @@ import { get_error_message, get_error_stack } from '../utils/error-utils.js';
 import { getMemoryScope, invalidateScopeCache } from '../services/memory-scope-service.js';
 import { get_llm_config_from_db, save_llm_config_to_db, type LLMConfig } from '../services/llm-service.js';
 import { entityResolver } from '../services/entity-resolver.js';
+import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
+>>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
+=======
 import { create_rate_limiter } from '../middleware/rate-limit.js';
 import { validateKatraKey } from '../utils/api-key-manager.js';
+import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
+=======
+import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
+>>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
 
 export const create_admin_routes = (): Hono => {
   const router = new Hono();
@@ -808,6 +815,22 @@ export const create_admin_routes = (): Hono => {
       success: false,
       error: 'Conversation service not available in Katra. Use the MCP tools or REST API for memory operations.'
     }, 501);
+  });
+
+  /**
+   * POST /api/v1/admin/trigger-reflection
+   * Manually trigger a sleep consolidation run.
+   */
+  router.post('/trigger-reflection', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { period_type, user_id } = body;
+      const service = SleepConsolidationService.get_instance();
+      const result = await service.consolidate(period_type || 'daily', user_id);
+      return c.json({ success: result.success, result });
+    } catch (error: any) {
+      return c.json({ success: false, error: error.message }, 500);
+    }
   });
 
   // ── System Identity ────────────────────────────────

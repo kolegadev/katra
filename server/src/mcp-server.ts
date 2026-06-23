@@ -46,7 +46,19 @@ import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache
 import { llmService, get_llm_config_from_db, save_llm_config_to_db } from './services/llm-service.js';
 import { getEpisodicEventManager } from './services/episodic-event-manager.js';
 import { stableContentHash } from './services/content-hash-utils.js';
+import { ensureApiKeys, logGeneratedKeys } from './utils/api-key-manager.js';
+import { ReflectionStore } from './services/reflection-store.js';
+import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
+>>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
+=======
 import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured } from './utils/api-key-manager.js';
+import { ReflectionStore } from './services/reflection-store.js';
+import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
+=======
+import { ensureApiKeys, logGeneratedKeys } from './utils/api-key-manager.js';
+import { ReflectionStore } from './services/reflection-store.js';
+import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
+>>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
 
 dotenv.config();
 
@@ -469,6 +481,57 @@ const tools = [
     name: 'configure_llm',
     description: 'Configure the LLM provider for semantic memory extraction, auto-journaling, and summaries. Reconfigures the live service without restart. The agent can call this to self-configure during setup.',
     inputSchema: zodToJsonSchema(ConfigureLLMInput) as Record<string, unknown>,
+  },
+  // ── Sleep Consolidation / Reflection ─────────────────────────
+  {
+    name: 'get_daily_reflection',
+    description: 'Get the most recent reflective journal entry from sleep consolidation — the AI\'s introspective narrative for a period (daily, weekly, or monthly).',
+    inputSchema: zodToJsonSchema(z.object({
+      period_type: z.enum(['daily', 'weekly', 'monthly']).optional().default('daily'),
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_emotional_context',
+    description: 'Get the emotional/reflective context for an entity — how the AI "feels" about a person, project, tool, or concept based on accumulated reflections. Returns the entity\'s emotional signature and all related emotional edges.',
+    inputSchema: zodToJsonSchema(z.object({
+      entity_name: z.string().describe('The entity name to get emotional context for'),
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_philosophical_insights',
+    description: 'Query philosophical insights derived from reflection — abstracted principles and realizations that have emerged across sleep consolidation periods.',
+    inputSchema: zodToJsonSchema(z.object({
+      domain: z.string().optional().describe('Filter by domain (engineering, relationships, self, etc.)'),
+      status: z.enum(['emerging', 'strengthening', 'stable', 'challenged']).optional(),
+      limit: z.number().int().min(1).max(50).optional().default(10),
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_unresolved_threads',
+    description: 'Get currently unresolved questions, tensions, and incomplete thoughts that persist across reflection periods — the open loops in the agent\'s consciousness.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_reflection_arc',
+    description: 'Trace the emotional trajectory for an entity over time — how feelings and attitudes have evolved across reflection periods. Returns a timeline of emotional signatures.',
+    inputSchema: zodToJsonSchema(z.object({
+      entity_name: z.string().describe('The entity to trace emotional evolution for'),
+      user_id: z.string().optional(),
+      limit: z.number().int().min(1).max(50).optional().default(10),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'trigger_reflection',
+    description: 'Manually trigger a sleep consolidation run for a specific time period. The AI will gather all memory data from the period and distill it into emotional understanding, philosophical insights, and a reflective narrative.',
+    inputSchema: zodToJsonSchema(z.object({
+      period_type: z.enum(['daily', 'weekly', 'monthly']).describe('The time period to consolidate'),
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
   },
 ];
 
@@ -1705,6 +1768,151 @@ async function handleConfigureLLM(args: unknown): Promise<TextContent[]> {
   }
 }
 
+async function handleGetDailyReflection(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    period_type: z.enum(['daily', 'weekly', 'monthly']).optional().default('daily'),
+    user_id: z.string().optional(),
+  }).parse(args);
+  
+  const store = ReflectionStore.get_instance();
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const journal = await store.getLatestJournal(userId, input.period_type);
+  
+  if (!journal) {
+    return [{ type: 'text', text: `No ${input.period_type} reflection found yet. Sleep consolidation runs automatically — the first reflection will appear after the next scheduled run, or use trigger_reflection to run one manually.` }];
+  }
+
+  const insightLine = journal.philosophical_insight ? `\n**Philosophical Insight:** ${journal.philosophical_insight}` : '';
+  const identityLine = journal.identity_delta ? `\n**Identity Shift:** ${journal.identity_delta}` : '';
+  const threadsLine = journal.unresolved_threads.length > 0 ? `\n**Unresolved Threads:**\n${journal.unresolved_threads.map((t: string) => `- ${t}`).join('\n')}` : '';
+
+  return [{
+    type: 'text',
+    text: `## ${input.period_type.charAt(0).toUpperCase() + input.period_type.slice(1)} Reflection (${journal.period_start?.toISOString().split('T')[0] || 'unknown'})\n\n**Emotional Arc:** ${journal.emotional_arc?.dominant_emotion || 'neutral'} (intensity: ${journal.emotional_arc?.intensity || 0}, trajectory: ${journal.emotional_arc?.trajectory || 'stable'})\n\n${journal.narrative}${insightLine}${identityLine}${threadsLine}`,
+  }];
+}
+
+async function handleGetEmotionalContext(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    entity_name: z.string(),
+    user_id: z.string().optional(),
+  }).parse(args);
+  
+  const store = ReflectionStore.get_instance();
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const context = await store.getEmotionalContext(userId, input.entity_name);
+  
+  if (!context.node && context.edges.length === 0) {
+    return [{ type: 'text', text: `No emotional context found for "${input.entity_name}". This entity hasn't appeared in any reflections yet.` }];
+  }
+
+  const nodeInfo = context.node
+    ? `**Emotional Signature:** ${context.node.emotional_signature.primary_emotion} (intensity: ${context.node.emotional_signature.intensity}, valence: ${context.node.emotional_signature.valence > 0 ? 'positive' : context.node.emotional_signature.valence < 0 ? 'negative' : 'neutral'})\n**Stability:** ${context.node.emotional_signature.stability}\n**Context:** ${context.node.reflection_context}\n**Observations:** ${context.node.observation_count}\n`
+    : '';
+
+  const edgeList = context.edges.length > 0
+    ? `\n**Emotional Connections (${context.edges.length}):**\n${context.edges.map((e: any) => `- ${e.edge_type.replace(/_/g, ' ')} → ${e.target_entity === input.entity_name ? e.source_entity : e.target_entity} (intensity: ${e.intensity})`).join('\n')}`
+    : '';
+
+  return [{
+    type: 'text',
+    text: `## Emotional Context: ${input.entity_name}\n\n${nodeInfo}${edgeList}`,
+  }];
+}
+
+async function handleGetPhilosophicalInsights(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    domain: z.string().optional(),
+    status: z.enum(['emerging', 'strengthening', 'stable', 'challenged']).optional(),
+    limit: z.number().int().min(1).max(50).optional().default(10),
+    user_id: z.string().optional(),
+  }).parse(args);
+  
+  const store = ReflectionStore.get_instance();
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const insights = await store.getInsights(userId, { domain: input.domain, status: input.status, limit: input.limit });
+  
+  if (insights.length === 0) {
+    return [{ type: 'text', text: 'No philosophical insights found yet. Insights emerge over time as sleep consolidation detects recurring patterns across reflection periods.' }];
+  }
+
+  const lines = insights.map((i: any) =>
+    `- **[${i.status}]** ${i.insight_text} (domain: ${i.domain}, evidence: ${i.evidence_count} periods, confidence: ${(i.confidence * 100).toFixed(0)}%)`
+  );
+
+  return [{
+    type: 'text',
+    text: `## Philosophical Insights (${insights.length})\n\n${lines.join('\n')}`,
+  }];
+}
+
+async function handleGetUnresolvedThreads(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ user_id: z.string().optional() }).parse(args);
+  
+  const store = ReflectionStore.get_instance();
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const threads = await store.getUnresolvedThreads(userId);
+  
+  if (threads.length === 0) {
+    return [{ type: 'text', text: 'No unresolved threads. All questions and tensions from recent periods have been resolved or have not yet emerged.' }];
+  }
+
+  return [{
+    type: 'text',
+    text: `## Unresolved Threads (${threads.length})\n\n${threads.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n')}`,
+  }];
+}
+
+async function handleGetReflectionArc(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    entity_name: z.string(),
+    user_id: z.string().optional(),
+    limit: z.number().int().min(1).max(50).optional().default(10),
+  }).parse(args);
+  
+  const store = ReflectionStore.get_instance();
+  const userId = input.user_id || DEFAULT_USER_ID;
+  const arc = await store.getReflectionArc(userId, input.entity_name, input.limit);
+  
+  if (arc.length === 0) {
+    return [{ type: 'text', text: `No emotional arc found for "${input.entity_name}". This entity hasn't appeared in any reflections yet.` }];
+  }
+
+  const points = arc.map((p: any, i: number) => {
+    const date = p.date ? new Date(p.date).toISOString().split('T')[0] : 'unknown';
+    if (!p.emotional_signature) return `- ${date}: (no emotional data)`;
+    return `- ${date}: ${p.emotional_signature.edge_type?.replace(/_/g, ' ') || 'neutral'} (intensity: ${p.emotional_signature.intensity || 0}, valence: ${p.emotional_signature.valence || 0})`;
+  });
+
+  return [{
+    type: 'text',
+    text: `## Emotional Arc: ${input.entity_name}\n\n${points.join('\n')}\n\n**Latest Narrative:** ${arc[0]?.narrative_snippet || 'none'}`,
+  }];
+}
+
+async function handleTriggerReflection(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    period_type: z.enum(['daily', 'weekly', 'monthly']),
+    user_id: z.string().optional(),
+  }).parse(args);
+  
+  const service = SleepConsolidationService.get_instance();
+  const result = await service.consolidate(input.period_type, input.user_id);
+  
+  if (!result.success) {
+    return [{ type: 'text', text: `❌ Reflection failed: ${result.error || 'Unknown error'}` }];
+  }
+
+  const preview = result.narrative_preview 
+    ? `\n\n**Narrative Preview:** ${result.narrative_preview}...`
+    : '';
+
+  return [{
+    type: 'text',
+    text: `✅ ${input.period_type.charAt(0).toUpperCase() + input.period_type.slice(1)} reflection completed.\n\n**Period:** ${result.period_start?.toISOString().split('T')[0] || '?'} → ${result.period_end?.toISOString().split('T')[0] || '?'}\n**Nodes upserted:** ${result.nodes_upserted}\n**Edges upserted:** ${result.edges_upserted}\n**Insights upserted:** ${result.insights_upserted}${preview}`,
+  }];
+}
+
 function createMCPServer() {
   return new Server(
     { name: 'cognitive-memory', version: '3.0.0' },
@@ -1754,6 +1962,12 @@ function registerHandlers(server: Server) {
         case 'set_memory_scope': result = await handleSetMemoryScope(args); break;
         case 'get_llm_config': result = await handleGetLLMConfig(); break;
         case 'configure_llm': result = await handleConfigureLLM(args); break;
+        case 'get_daily_reflection': result = await handleGetDailyReflection(args); break;
+        case 'get_emotional_context': result = await handleGetEmotionalContext(args); break;
+        case 'get_philosophical_insights': result = await handleGetPhilosophicalInsights(args); break;
+        case 'get_unresolved_threads': result = await handleGetUnresolvedThreads(args); break;
+        case 'get_reflection_arc': result = await handleGetReflectionArc(args); break;
+        case 'trigger_reflection': result = await handleTriggerReflection(args); break;
         default: throw new Error(`Unknown tool: ${name}`);
       }
       return { content: result, isError: false };

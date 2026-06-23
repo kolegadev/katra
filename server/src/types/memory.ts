@@ -106,3 +106,154 @@ export interface MemorySystemHealth {
     total_assets: number;
   };
 }
+
+// ── Sleep Consolidation / Reflection Types ──────────────────────────
+
+export type ReflectionPeriodType = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type ReflectionEdgeType =
+  | 'feels_excited_about'
+  | 'feels_frustrated_by'
+  | 'feels_curious_about'
+  | 'feels_confident_in'
+  | 'feels_anxious_about'
+  | 'feels_grateful_for'
+  | 'feels_conflicted_between'
+  | 'growing_toward'
+  | 'distancing_from'
+  | 'protective_of'
+  | 'inspired_by'
+  | 'drained_by'
+  | 'resonates_with'
+  | 'tension_between'
+  | 'harmony_between';
+
+export interface ReflectiveJournal {
+  _id?: any;
+  user_id: string;
+  shared_id?: string;
+  period_type: ReflectionPeriodType;
+  period_start: Date;
+  period_end: Date;
+  narrative: string;
+  emotional_arc: {
+    dominant_emotion: string;
+    intensity: number;
+    trajectory: 'rising' | 'falling' | 'stable' | 'oscillating' | 'transformative';
+    secondary_emotions: Array<{ emotion: string; intensity: number }>;
+  };
+  philosophical_insight?: string;
+  identity_delta?: string;
+  unresolved_threads: string[];
+  source_events: string[];
+  source_sessions: string[];
+  created_at: Date;
+}
+
+export interface ReflectionNode {
+  _id?: any;
+  user_id: string;
+  entity_name: string;
+  entity_type: string;
+  emotional_signature: {
+    primary_emotion: string;
+    intensity: number;
+    valence: number;
+    stability: 'volatile' | 'steady' | 'growing' | 'fading';
+  };
+  reflection_context: string;
+  first_observed: Date;
+  last_updated: Date;
+  observation_count: number;
+  created_at: Date;
+}
+
+export interface ReflectionEdge {
+  _id?: any;
+  user_id: string;
+  source_entity: string;
+  target_entity: string;
+  edge_type: ReflectionEdgeType;
+  intensity: number;
+  valence: number;
+  narrative: string;
+  first_observed: Date;
+  last_updated: Date;
+  source_journal_id: any;
+  created_at: Date;
+}
+
+export interface PhilosophicalInsight {
+  _id?: any;
+  user_id: string;
+  insight_text: string;
+  domain: string;
+  confidence: number;
+  evidence_count: number;
+  first_observed: Date;
+  last_reinforced: Date;
+  source_journal_ids: any[];
+  contradictory_evidence?: string[];
+  status: 'emerging' | 'strengthening' | 'stable' | 'challenged';
+  created_at: Date;
+}
+
+export interface GatheredData {
+  period_start: Date;
+  period_end: Date;
+  event_count: number;
+  session_count: number;
+  conversation_summaries: string;
+  semantic_facts: string;
+  active_entities: string;
+  prior_journal_narrative: string | null;
+  unresolved_threads: string[];
+}
+
+export interface ReflectionLLMOutput {
+  emotional_arc: {
+    dominant_emotion: string;
+    intensity: number;
+    trajectory: 'rising' | 'falling' | 'stable' | 'oscillating' | 'transformative';
+    secondary_emotions: Array<{ emotion: string; intensity: number }>;
+  };
+  entity_reflections: Array<{
+    entity_name: string;
+    entity_type: string;
+    emotional_signature: {
+      primary_emotion: string;
+      intensity: number;
+      valence: number;
+      stability: 'volatile' | 'steady' | 'growing' | 'fading';
+    };
+    reflection: string;
+  }>;
+  relationships: Array<{
+    source_entity: string;
+    target_entity: string;
+    edge_type: string;
+    intensity: number;
+    valence: number;
+    narrative: string;
+  }>;
+  philosophical_insight: {
+    insight_text: string;
+    domain: string;
+  } | null;
+  identity_delta: string | null;
+  unresolved_threads: string[];
+  narrative: string;
+}
+
+export interface ConsolidationResult {
+  success: boolean;
+  period_type: string;
+  period_start: Date;
+  period_end: Date;
+  journal_id?: string;
+  nodes_upserted: number;
+  edges_upserted: number;
+  insights_upserted: number;
+  narrative_preview?: string;
+  error?: string;
+}

@@ -225,6 +225,52 @@ export const MEMORY_SYSTEM_INDEXES: CollectionIndexes = {
       keys: { key: 1 },
       options: { name: 'key_unique', unique: true, background: true }
     }
+  ],
+
+  // ── Sleep Consolidation / Reflection Collections ──────────────
+
+  reflective_journals: [
+    {
+      keys: { user_id: 1, period_type: 1, period_start: -1 },
+      options: { name: 'user_period_start', background: true }
+    },
+    {
+      keys: { user_id: 1, created_at: -1 },
+      options: { name: 'user_created', background: true }
+    }
+  ],
+
+  reflection_nodes: [
+    {
+      keys: { user_id: 1, entity_name: 1 },
+      options: { name: 'user_entity_unique', unique: true, background: true }
+    },
+    {
+      keys: { user_id: 1, 'emotional_signature.primary_emotion': 1 },
+      options: { name: 'user_emotion', background: true }
+    }
+  ],
+
+  reflection_edges: [
+    {
+      keys: { user_id: 1, source_entity: 1, target_entity: 1, edge_type: 1 },
+      options: { name: 'user_edge_unique', background: true }
+    },
+    {
+      keys: { user_id: 1, source_journal_id: 1 },
+      options: { name: 'user_journal', background: true }
+    }
+  ],
+
+  philosophical_insights: [
+    {
+      keys: { user_id: 1, domain: 1 },
+      options: { name: 'user_domain', background: true }
+    },
+    {
+      keys: { user_id: 1, status: 1 },
+      options: { name: 'user_status', background: true }
+    }
   ]
 };
 
