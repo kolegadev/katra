@@ -5,12 +5,66 @@
  * Knowledge Graph compaction pipeline.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCompactionQueueService, getSemanticMemoryService, getMemorySynthesisService } from '../services/knowledge-graph-factory.js';
 import { get_database } from '../database/connection.js';
+import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
+
+function safeEqual(a: string, b: string): boolean {
+    const ab = Buffer.from(a);
+    const bb = Buffer.from(b);
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+}
+
+// Minimal in-memory rate limiter for the LLM-backed build-from-facts endpoint.
+// LIMITATION: per-process only — effective limit multiplies by process count under clustering.
+const BUILD_RATE_LIMIT_MAX = 3;
+const BUILD_RATE_LIMIT_WINDOW_MS = 60_000;
+const buildFromFactsCalls = new Map<string, number[]>();
+
+function checkBuildRateLimit(userId: string): number | null {
+    const now = Date.now();
+    const windowStart = now - BUILD_RATE_LIMIT_WINDOW_MS;
+
+    // Opportunistically prune stale entries to bound Map growth.
+    for (const [key, timestamps] of buildFromFactsCalls) {
+        const recent = timestamps.filter((t) => t > windowStart);
+        if (recent.length === 0) buildFromFactsCalls.delete(key);
+        else buildFromFactsCalls.set(key, recent);
+    }
+
+    const timestamps = (buildFromFactsCalls.get(userId) ?? []).filter((t) => t > windowStart);
+    if (timestamps.length >= BUILD_RATE_LIMIT_MAX) {
+        const retryAfterMs = timestamps[0] + BUILD_RATE_LIMIT_WINDOW_MS - now;
+        return Math.max(1, Math.ceil(retryAfterMs / 1000));
+    }
+
+    timestamps.push(now);
+    buildFromFactsCalls.set(userId, timestamps);
+    return null;
+}
 
 export function create_knowledge_graph_routes(): Hono {
   const router = new Hono();
+
+  // Route-level auth guard — mirrors memory-routes.ts pattern.
+  // In dev mode (KATRA_API_KEY unset) this passes through, consistent with the
+  // rest of the codebase. The user-scoping fix in build-from-facts independently
+  // prevents cross-tenant data exposure even in that dev passthrough mode.
+  router.use('*', async (c, next) => {
+    const apiKey = process.env.KATRA_API_KEY;
+    if (!apiKey) {
+      return next();
+    }
+    const header = c.req.header('Authorization') ?? '';
+    const presented = /^Bearer\s+(.+)$/i.exec(header)?.[1];
+    if (!presented || !safeEqual(presented, apiKey)) {
+      return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
+    }
+    return next();
+  });
 
   /**
    * POST /activity — Register user activity (typing, interaction).
@@ -137,12 +191,32 @@ export function create_knowledge_graph_routes(): Hono {
    */
   router.post('/build-from-facts', async (c) => {
     try {
+      const body = await c.req.json();
+
+      // Resolve user scope. Coerce to string to prevent NoSQL injection
+      // (e.g. a body like { user_id: { "$ne": null } } must not bypass the filter).
+      const rawUserId = body?.user_id;
+      const userId = typeof rawUserId === 'string' && rawUserId.length > 0
+        ? rawUserId
+        : DEFAULT_USER_ID;
+
+      // Enforce rate limit to cap LLM API costs per user.
+      const retryAfter = checkBuildRateLimit(userId);
+      if (retryAfter !== null) {
+        c.header('Retry-After', String(retryAfter));
+        return c.json({
+          success: false,
+          error: 'Rate limit exceeded. Please retry later.',
+          retry_after_seconds: retryAfter,
+        }, 429);
+      }
+
       const db = get_database();
       const sms = getSemanticMemoryService();
 
-      // Read all semantic facts
+      // Scope the query to the authenticated user's facts only.
       const facts = await db.collection('semantic_facts')
-        .find({})
+        .find({ user_id: userId })
         .sort({ created_at: -1, timestamp: -1 })
         .limit(100)
         .toArray();
