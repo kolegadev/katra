@@ -130,7 +130,7 @@ async function initialize_redis_client(): Promise<RedisClientType> {
         // Connect to Redis
         await redis_client.connect();
         
-        console.log(`✅ Redis connected to ${redis_config.url || redis_config.host}:${redis_config.port}`);
+        console.log(`✅ Redis connected to ${redis_config.url ? mask_redis_url(redis_config.url) : redis_config.host + ':' + redis_config.port}`);
         return redis_client;
 
     } catch (error) {
