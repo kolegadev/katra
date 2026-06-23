@@ -7,16 +7,19 @@ missions, and working memory from a cognitive-memory-chat MongoDB database to a 
 MongoDB database. Both databases can be in the same MongoDB instance or different ones.
 
 Usage:
-    python3 migrate_from_cognitive_memory.py --source "mongodb://admin:***@localhost:27017/cognitive-memory?authSource=admin" --target "mongodb://admin:***@localhost:27017/katra?authSource=admin"
+    export SOURCE_MONGODB_URI="mongodb://admin:secret@localhost:27017/cognitive-memory?authSource=admin"
+    export TARGET_MONGODB_URI="mongodb://admin:secret@localhost:27017/katra?authSource=admin"
+    python3 migrate_from_cognitive_memory.py
 
     # Dry run (count only, no copying):
-    python3 migrate_from_cognitive_memory.py --source ... --target ... --dry-run
+    python3 migrate_from_cognitive_memory.py --dry-run
 
     # Specific collections only:
-    python3 migrate_from_cognitive_memory.py --source ... --target ... --collections episodic_events,semantic_facts
+    python3 migrate_from_cognitive_memory.py --collections episodic_events,semantic_facts
 """
 
 import argparse
+import os
 import sys
 import time
 from pymongo import MongoClient
@@ -159,17 +162,25 @@ def migrate(source_uri: str, target_uri: str, dry_run: bool = False,
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate data from cognitive-memory-chat to Katra")
-    parser.add_argument("--source", required=True, help="Source MongoDB URI (cognitive-memory-chat)")
-    parser.add_argument("--target", required=True, help="Target MongoDB URI (Katra)")
     parser.add_argument("--dry-run", action="store_true", help="Count only, don't copy")
     parser.add_argument("--collections", default=None, help="Comma-separated list of collections to migrate")
     parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for copying")
     args = parser.parse_args()
 
+    source_uri = os.environ.get("SOURCE_MONGODB_URI")
+    target_uri = os.environ.get("TARGET_MONGODB_URI")
+
+    if not source_uri:
+        print("Error: SOURCE_MONGODB_URI environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
+    if not target_uri:
+        print("Error: TARGET_MONGODB_URI environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
+
     collections_filter = args.collections.split(",") if args.collections else None
 
     start = time.time()
-    migrate(args.source, args.target, args.dry_run, collections_filter, args.batch_size)
+    migrate(source_uri, target_uri, args.dry_run, collections_filter, args.batch_size)
     elapsed = time.time() - start
     print(f"Elapsed: {elapsed:.1f}s")
 
