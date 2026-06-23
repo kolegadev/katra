@@ -235,9 +235,13 @@ export class MemoryManager {
       // The content-hash catches exact duplicates only, but the LLM extraction
       // often rephrases the same fact slightly differently across cycles.
       // This prevents near-duplicate proliferation.
+      //
+      // ALSO: this is the canonical embedding generation point. The computed
+      // vector is reused both for dedup and for storage on the fact document.
+      let factEmbedding: number[] | null = null;
       try {
         if (embeddingService.isReady) {
-          const factEmbedding = await embeddingService.encode(fact.content, 'semantic_fact');
+          factEmbedding = await embeddingService.encode(fact.content, 'semantic_fact');
           if (factEmbedding && factEmbedding.length > 0) {
             const recentFacts = await db.collection('semantic_facts')
               .find({
@@ -253,10 +257,11 @@ export class MemoryManager {
                 const similarity = embeddingService.cosineSimilarity(factEmbedding, existing.embedding);
                 if (similarity > 0.92) {
                   // Near-duplicate found — bump extraction count on existing
+                  // and also store the embedding on the existing doc if missing.
                   await db.collection('semantic_facts').updateOne(
                     { _id: existing._id },
                     {
-                      $set: { updated_at: new Date() },
+                      $set: { updated_at: new Date(), embedding: existing.embedding || factEmbedding },
                       $inc: { extraction_count: 1 },
                       $max: { confidence: fact.confidence || 0 },
                     }
@@ -270,6 +275,7 @@ export class MemoryManager {
         }
       } catch (dedupError) {
         // Non-critical — fall through to normal upsert if embedding check fails
+        factEmbedding = null;
       }
 
       // Strip client-supplied timestamp fields to avoid conflict with
@@ -277,12 +283,25 @@ export class MemoryManager {
       // always set to now on every update.
       const { created_at: _created_at, updated_at: _updated_at, ...factData } = fact;
 
-      const factDocument = {
+      const factDocument: Record<string, unknown> = {
         ...factData,
         user_id: userId,
         content_hash: contentHash,
         updated_at: new Date(),
       };
+
+      // Store the embedding computed during de-dup (or compute it now if skipped).
+      // This is the canonical path that gives semantic_facts their vector embeddings.
+      if (!factEmbedding) {
+        try {
+          factEmbedding = await embeddingService.encode(fact.content, 'semantic_fact');
+        } catch {
+          factEmbedding = null;
+        }
+      }
+      if (factEmbedding && factEmbedding.length > 0) {
+        factDocument.embedding = factEmbedding;
+      }
 
       const result = await db.collection('semantic_facts').findOneAndUpdate(
         { content_hash: contentHash },
