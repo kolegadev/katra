@@ -5,6 +5,7 @@
  * This implementation provides a foundation that can be extended as advanced memory services come online.
  */
 
+import { timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import { working_memory_service } from '../services/working-memory-service.js';
 import { learning_feedback_service } from '../services/learning-feedback-service.js';
@@ -17,6 +18,13 @@ import { buildScopeFilter, DEFAULT_USER_ID } from '../services/memory-scope-serv
 
 const DEBUG_ENDPOINTS_ENABLED = process.env.KATRA_ENABLE_DEBUG_ENDPOINTS === 'true';
 
+function safeEqual(a: string, b: string): boolean {
+    const ab = Buffer.from(a);
+    const bb = Buffer.from(b);
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+}
+
 function debugDisabledResponse() {
     return {
         success: false,
@@ -26,6 +34,19 @@ function debugDisabledResponse() {
 
 export const create_memory_routes = (): Hono => {
     const router = new Hono();
+
+    router.use('*', async (c, next) => {
+        const apiKey = process.env.KATRA_API_KEY;
+        if (!apiKey) {
+            return next();
+        }
+        const header = c.req.header('Authorization') ?? '';
+        const presented = /^Bearer\s+(.+)$/i.exec(header)?.[1];
+        if (!presented || !safeEqual(presented, apiKey)) {
+            return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
+        }
+        return next();
+    });
 
     // Health check endpoint
     router.get('/health', async (c) => {
