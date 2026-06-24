@@ -60,8 +60,8 @@ turning stateless agents into agents with memory.
 ### 1. Start the Katra Server
 
 ```bash
-git clone https://github.com/kolegadev/katra.git
-cd katra
+git clone https://github.com/kolegadev/Katra-Agentic-Memory.git
+cd Katra-Agentic-Memory
 cp .env.example .env  # Optional: set custom API keys; leave blank for auto-generation
 docker-compose up -d --build
 ```

@@ -10,8 +10,8 @@ Get Katra running in 5 minutes.
 ## 1. Clone and Configure
 
 ```bash
-git clone https://github.com/kolegadev/katra.git
-cd katra
+git clone https://github.com/kolegadev/Katra-Agentic-Memory.git
+cd Katra-Agentic-Memory
 cp .env.example .env
 ```
 

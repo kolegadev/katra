@@ -86,7 +86,7 @@ cd cognitive-memory-chat
 docker compose up -d  # ports 9002, 3100
 
 # Katra (different ports)
-cd katra
+cd Katra-Agentic-Memory
 # Edit docker-compose.yml: change ports to 9012:9002, 3112:3100
 docker compose up -d
 ```

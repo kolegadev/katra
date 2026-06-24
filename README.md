@@ -23,13 +23,15 @@ It is typically initiated through physical contact with specific points on the s
 ## Quick Start
 
 ```bash
-git clone https://github.com/kolegadev/katra.git
-cd katra
+git clone https://github.com/kolegadev/Katra-Agentic-Memory.git
+cd Katra-Agentic-Memory
 cp .env.example .env
 # Optional: edit .env to set custom API keys.
 # If left blank, Katra generates secure keys on first boot and prints them.
 docker-compose up -d --build
 ```
+
+> **Note:** The original URL `https://github.com/kolegadev/katra.git` still works (GitHub redirects it).
 
 That's it. Katra is running:
 

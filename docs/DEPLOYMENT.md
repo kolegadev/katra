@@ -3,8 +3,8 @@
 ## Local Docker (Recommended)
 
 ```bash
-git clone https://github.com/kolegadev/katra.git
-cd katra
+git clone https://github.com/kolegadev/Katra-Agentic-Memory.git
+cd Katra-Agentic-Memory
 cp .env.example .env
 # Edit .env — set MCP_API_KEY, KATRA_API_KEY, and optional LLM keys
 docker compose up -d
