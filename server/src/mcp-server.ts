@@ -480,6 +480,18 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
 
   const db = get_database();
 
+  // Reject raw JSON objects/arrays as content — they cause nested-JSON noise on
+  // re-extraction cycles. Agents must store plain-text summaries, not raw data.
+  const trimmedContent = input.content.trim();
+  if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmedContent);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return [{ type: 'text', text: '⚠️ Content is a JSON object/array. Store a plain-text one-sentence summary instead of raw data structures.' }];
+      }
+    } catch { /* Not valid JSON — allow through */ }
+  }
+
   // Aligned default user id across store + search (see memory-scope-service).
   const userId = input.user_id || DEFAULT_USER_ID;
   const source = input.source || 'mcp_store';
@@ -1138,13 +1150,15 @@ async function handleStoreJournal(args: unknown): Promise<TextContent[]> {
   // Resolve shared_id based on current memory scope mode
   const sharedId = await resolveSharedId(input.shared_id);
 
+  const now = new Date();
   const doc: Record<string, unknown> = {
     user_id: input.user_id,
     text: input.entry,
     entry: input.entry,
     source: input.source,
     tags: input.tags || [],
-    timestamp: new Date(),
+    timestamp: now,
+    created_at: now,
   };
 
   if (sharedId) {
@@ -1152,6 +1166,23 @@ async function handleStoreJournal(args: unknown): Promise<TextContent[]> {
   }
 
   const result = await db.collection(collection).insertOne(doc);
+
+  // Auto-log a heartbeat run when storing a heartbeat-tagged journal entry.
+  // Mnemosyne (katra-caretaker) calls store_journal with tags:['heartbeat',...]
+  // at the end of each heartbeat cycle — this is how runs get recorded.
+  if ((input.tags || []).includes('heartbeat')) {
+    try {
+      await db.collection('heartbeat_runs').insertOne({
+        started_at: now,
+        status: 'ok',
+        tasks_due: (input.tags || []).filter((t: string) => t !== 'heartbeat'),
+        journal_id: result.insertedId,
+        user_id: input.user_id,
+      });
+    } catch {
+      // Non-critical — journal was stored, run logging is best-effort
+    }
+  }
 
   const scopeInfo = sharedId ? `\n**Shared ID:** \`${sharedId}\`` : '';
 
@@ -1485,20 +1516,23 @@ async function handleGetAutoJournal(args: unknown): Promise<TextContent[]> {
   const db = get_database();
 
   const scopeFilter = await buildScopeFilter(input.user_id);
-  const filter: Record<string, unknown> = { ...scopeFilter, source: 'auto' };
-  if (input.since) filter.created_at = { $gte: new Date(input.since) };
+  // All documents in agent_journal_auto are auto-generated regardless of their
+  // specific source tag ('auto', 'system', 'agent', etc.) — don't filter by source.
+  const filter: Record<string, unknown> = { ...scopeFilter };
+  if (input.since) filter.timestamp = { $gte: new Date(input.since) };
 
   const entries = await db.collection('agent_journal_auto')
     .find(filter)
-    .sort({ created_at: -1 })
+    .sort({ timestamp: -1 })
     .limit(input.limit)
     .toArray();
 
   const lines: string[] = [`## Auto Journal (${entries.length})`, ''];
   if (entries.length === 0) lines.push('*No auto-generated journal entries found.*');
   else entries.forEach((e: any) => {
-    lines.push(`### ${e.created_at ? new Date(e.created_at).toISOString() : '?'}`);
-    lines.push(e.entry || e.content || JSON.stringify(e));
+    const ts = e.timestamp || e.created_at;
+    lines.push(`### ${ts ? new Date(ts).toISOString() : '?'}`);
+    lines.push(e.entry || e.text || e.content || JSON.stringify(e));
     if (e.tags?.length) lines.push(`*Tags: ${e.tags.join(', ')}*`);
     lines.push('');
   });

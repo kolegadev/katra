@@ -11,6 +11,8 @@
 
 import { get_database } from '../database/connection.js';
 import { llmService } from './llm-service.js';
+import { embeddingService } from './embedding-service.js';
+import { stableContentHash } from './content-hash-utils.js';
 
 interface TimeBlockSummary {
   user_id: string;
@@ -368,15 +370,23 @@ SUMMARY:`;
   }
 
   /**
-   * Store a time-block summary as a semantic_fact.
+   * Store a time-block summary as a semantic_fact with content_hash and embedding.
    */
   private async storeSummary(summary: TimeBlockSummary): Promise<void> {
     const db = get_database();
+    const contentHash = stableContentHash(summary.user_id, summary.summary);
 
-    await db.collection('semantic_facts').insertOne({
+    // Compute embedding so vector search can find time-block summaries.
+    let embedding: number[] | null = null;
+    try {
+      embedding = await embeddingService.encode(summary.summary, 'time_block_summary');
+    } catch { /* non-critical */ }
+
+    const doc: Record<string, unknown> = {
       user_id: summary.user_id,
       fact_type: 'time_block_summary',
       content: summary.summary,
+      content_hash: contentHash,
       topic: `time_block_${summary.block_type}`,
       confidence: 0.7,
       metadata: {
@@ -387,11 +397,19 @@ SUMMARY:`;
         top_topics: summary.top_topics,
         summary_generated_at: summary.generated_at,
       },
-      created_at: new Date(),
       updated_at: new Date(),
-    });
+    };
+    if (embedding && embedding.length > 0) {
+      doc.embedding = embedding;
+    }
 
-    console.log(`💾 Stored summary for ${summary.block_type} block: ${summary.event_count} events`);
+    await db.collection('semantic_facts').findOneAndUpdate(
+      { content_hash: contentHash },
+      { $set: doc, $setOnInsert: { created_at: new Date() } },
+      { upsert: true }
+    );
+
+    console.log(`💾 Stored summary for ${summary.block_type} block: ${summary.event_count} events (embedded: ${!!embedding})`);
   }
 }
 
