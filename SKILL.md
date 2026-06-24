@@ -554,3 +554,4 @@ The Katra server's background processor automatically:
 | `MCP_API_KEY` | *(required)* | MCP authentication key |
 | `KATRA_USER_ID` | `<hostname>-agent` | Default user_id for memories |
 | `KATRA_SHARED_ID` | *(empty)* | Shared ID for communal memory |
+- [Autonomous Loop](docs/AUTONOMOUS-LOOP.md) — Salience-driven agent autonomy
