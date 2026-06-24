@@ -15,10 +15,10 @@ A Vulcan mind meld (or mind fusion) is an iconic telepathic practice in **Star T
 
 It allows a Vulcan to merge their consciousness with another being to share thoughts, memories, emotions, and experiences. 
 It is typically initiated through physical contact with specific points on the subject's face. 
-**Key Mechanics & ApplicationsTouch Telepathy**: While primarily requiring direct physical touch to the face or head, exceptionally powerful Vulcans can perform the technique at a distance.
-**Information Exchange**: It is frequently used for interrogations, recovering suppressed memories, or passing deep knowledge between generations.
-**Transfer of the Katra**: In sacred or emergency circumstances, a mind meld can transfer a person's **katra**—their soul, consciousness, and core essence—into another living being or object prior to death.
-**Side Effects**: The experience can be physically and emotionally draining. Incorrectly performed melds can damage neural pathways, and participants may retain "echoes" of each other's memories and personalities long after the link is broken.
+- **Key Mechanics & ApplicationsTouch Telepathy**: While primarily requiring direct physical touch to the face or head, exceptionally powerful Vulcans can perform the technique at a distance.
+- **Information Exchange**: It is frequently used for interrogations, recovering suppressed memories, or passing deep knowledge between generations.
+- **Transfer of the Katra**: In sacred or emergency circumstances, a mind meld can transfer a person's **katra**—their soul, consciousness, and core essence—into another living being or object prior to death.
+- **Side Effects**: The experience can be physically and emotionally draining. Incorrectly performed melds can damage neural pathways, and participants may retain "echoes" of each other's memories and personalities long after the link is broken.
 
 ## Quick Start
 
