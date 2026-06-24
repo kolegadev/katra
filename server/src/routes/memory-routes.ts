@@ -5,6 +5,7 @@
  * This implementation provides a foundation that can be extended as advanced memory services come online.
  */
 
+import { Hono } from 'hono';
 import { working_memory_service } from '../services/working-memory-service.js';
 import { learning_feedback_service, AuthorizationError } from '../services/learning-feedback-service.js';
 import { database_optimization_service } from '../services/database-optimization-service.js';
