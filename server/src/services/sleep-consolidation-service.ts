@@ -464,7 +464,6 @@ RULES:
     }
 
     // 3. Upsert reflection edges
-    const journalObjectId = (await this.store.getLatestJournal(userId, period as string))?._id;
     for (const rel of output.relationships || []) {
       const edge: ReflectionEdge = {
         user_id: userId,
@@ -476,7 +475,7 @@ RULES:
         narrative: rel.narrative,
         first_observed: now,
         last_updated: now,
-        source_journal_id: journalObjectId,
+        source_journal_id: journalId,
         created_at: now,
       };
       await this.store.upsertReflectionEdge(edge);
@@ -493,7 +492,7 @@ RULES:
         evidence_count: 0,
         first_observed: now,
         last_reinforced: now,
-        source_journal_ids: journalObjectId ? [journalObjectId] : [],
+        source_journal_ids: [journalId],
         status: 'emerging',
         created_at: now,
       };

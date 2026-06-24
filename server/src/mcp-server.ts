@@ -46,19 +46,9 @@ import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache
 import { llmService, get_llm_config_from_db, save_llm_config_to_db } from './services/llm-service.js';
 import { getEpisodicEventManager } from './services/episodic-event-manager.js';
 import { stableContentHash } from './services/content-hash-utils.js';
-import { ensureApiKeys, logGeneratedKeys } from './utils/api-key-manager.js';
-import { ReflectionStore } from './services/reflection-store.js';
-import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
->>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
-=======
 import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured } from './utils/api-key-manager.js';
 import { ReflectionStore } from './services/reflection-store.js';
 import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
-=======
-import { ensureApiKeys, logGeneratedKeys } from './utils/api-key-manager.js';
-import { ReflectionStore } from './services/reflection-store.js';
-import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
->>>>>>> 719162f (feat: add sleep consolidation service — reflective memory distillation)
 
 dotenv.config();
 
@@ -1508,8 +1498,11 @@ async function handleWorkingMemory(args: unknown): Promise<TextContent[]> {
   }
 
   if (input.action === 'delete') {
-    await working_memory_service.delete(input.session_id);
-    return [{ type: 'text', text: `✅ Working memory cleared for session ${input.session_id}` }];
+    const items = await working_memory_service.get_session_memory(DEFAULT_USER_ID, input.session_id);
+    for (const item of items) {
+      await working_memory_service.delete(item.id);
+    }
+    return [{ type: 'text', text: `✅ Working memory cleared for session ${input.session_id} (${items.length} items removed).` }];
   }
 
   return [{ type: 'text', text: '⚠️ Unknown action.' }];
@@ -2220,7 +2213,7 @@ async function startHTTPServer(): Promise<void> {
         },
         active_sessions: transports.size,
         auth: {
-          required: isAuthRequired(),
+          required: isMcpAuthConfigured(),
           methods: ['X-MCP-Auth', 'Authorization: Bearer', '?token='],
         },
       }));

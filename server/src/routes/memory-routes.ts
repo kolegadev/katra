@@ -5,8 +5,6 @@
  * This implementation provides a foundation that can be extended as advanced memory services come online.
  */
 
-import { timingSafeEqual } from 'node:crypto';
-import { Hono } from 'hono';
 import { working_memory_service } from '../services/working-memory-service.js';
 import { learning_feedback_service, AuthorizationError } from '../services/learning-feedback-service.js';
 import { database_optimization_service } from '../services/database-optimization-service.js';
@@ -15,15 +13,9 @@ import { escape_regex } from '../utils/regex-escape.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateContentHash, generateIdempotencyKey } from '../services/content-hash-utils.js';
 import { buildScopeFilter, DEFAULT_USER_ID } from '../services/memory-scope-service.js';
+import { validateKatraKey } from '../utils/api-key-manager.js';
 
 const DEBUG_ENDPOINTS_ENABLED = process.env.KATRA_ENABLE_DEBUG_ENDPOINTS === 'true';
-
-function safeEqual(a: string, b: string): boolean {
-    const ab = Buffer.from(a);
-    const bb = Buffer.from(b);
-    if (ab.length !== bb.length) return false;
-    return timingSafeEqual(ab, bb);
-}
 
 function debugDisabledResponse() {
     return {
@@ -36,13 +28,11 @@ export const create_memory_routes = (): Hono => {
     const router = new Hono();
 
     router.use('*', async (c, next) => {
-        const apiKey = process.env.KATRA_API_KEY;
-        if (!apiKey) {
-            return next();
-        }
-        const header = c.req.header('Authorization') ?? '';
-        const presented = /^Bearer\s+(.+)$/i.exec(header)?.[1];
-        if (!presented || !safeEqual(presented, apiKey)) {
+        const result = await validateKatraKey(
+            c.req.header('Authorization') ?? '',
+            c.req.query('token') ?? undefined
+        );
+        if (!result.valid) {
             return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
         }
         return next();
