@@ -38,7 +38,6 @@ DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.openclaw/agents")
 DEFAULT_MCP_URL = os.environ.get("KATRA_MCP_URL", "http://localhost:3112/mcp")
 DEFAULT_API_KEY = os.environ.get("KATRA_API_KEY", "")
 DEFAULT_STATE_FILE = os.path.expanduser("~/.katra/watcher-state.json")
-DEFAULT_SHARED_ID = os.environ.get("KATRA_SHARED_ID", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,8 +116,7 @@ def parse_jsonl_session(filepath: str) -> tuple[str, list[str], str, str]:
 
 
 def store_session_to_memory(session_id: str, turns: list[str], provider: str, model: str,
-                            mcp_url: str, api_key: str, user_id: str = "default",
-                            shared_id: str = "") -> int:
+                            mcp_url: str, api_key: str, user_id: str = "default") -> int:
     """Initialize MCP session and store all turns from a session as one memory."""
     if not api_key:
         log.error("No API key configured. Set KATRA_API_KEY or api_key in config.")
@@ -171,18 +169,6 @@ def store_session_to_memory(session_id: str, turns: list[str], provider: str, mo
             summary += f" (+{len(turns)-1} more turns)"
 
         # Store memory
-        memory_args = {
-            "content": content,
-            "user_id": user_id,
-            "category": "event",
-            "confidence": 0.9,
-            "session_id": session_id,
-            "source": provider,
-            "tags": ["conversation", provider],
-        }
-        if shared_id:
-            memory_args["shared_id"] = shared_id
-
         r2 = session.post(
             mcp_url,
             headers=init_headers,
@@ -190,7 +176,12 @@ def store_session_to_memory(session_id: str, turns: list[str], provider: str, mo
                 "jsonrpc": "2.0", "id": 2, "method": "tools/call",
                 "params": {
                     "name": "store_memory",
-                    "arguments": memory_args,
+                    "arguments": {
+                        "content": content,
+                        "user_id": user_id,
+                        "category": "event",
+                        "confidence": 0.9,
+                    },
                 },
             },
             timeout=30,
@@ -222,7 +213,7 @@ def store_session_to_memory(session_id: str, turns: list[str], provider: str, mo
         return 0
 
 
-def process_file(filepath: str, state: dict, mcp_url: str, api_key: str, user_id: str, shared_id: str = "") -> int:
+def process_file(filepath: str, state: dict, mcp_url: str, api_key: str, user_id: str) -> int:
     file_hash = get_file_hash(filepath)
     if state["processed_files"].get(filepath) == file_hash:
         return 0
@@ -231,7 +222,7 @@ def process_file(filepath: str, state: dict, mcp_url: str, api_key: str, user_id
     if not turns:
         return 0
 
-    stored = store_session_to_memory(session_id, turns, provider, model, mcp_url, api_key, user_id, shared_id)
+    stored = store_session_to_memory(session_id, turns, provider, model, mcp_url, api_key, user_id)
 
     if stored > 0:
         state["processed_files"][filepath] = file_hash
@@ -260,14 +251,13 @@ def find_session_files(sessions_dir: str, glob_pattern: str = "**/*.jsonl",
     return sorted(files)
 
 
-def load_platform_config(config_path: str = None) -> tuple[list[dict], str, str, str, str, str]:
+def load_platform_config(config_path: str = None) -> tuple[list[dict], str, str, str, str]:
     """Load multi-platform session directory config.
-    Returns (platforms, mcp_url, api_key, state_file, default_user_id, shared_id)."""
+    Returns (platforms, mcp_url, api_key, state_file, default_user_id)."""
     mcp_url = DEFAULT_MCP_URL
     api_key = DEFAULT_API_KEY
     state_file = DEFAULT_STATE_FILE
     user_id = "default"
-    shared_id = DEFAULT_SHARED_ID
 
     if config_path:
         config_path = os.path.expanduser(config_path)
@@ -279,11 +269,10 @@ def load_platform_config(config_path: str = None) -> tuple[list[dict], str, str,
             api_key = config.get("api_key", api_key)
             state_file = config.get("state_file", state_file)
             user_id = config.get("default_user_id", user_id)
-            shared_id = config.get("shared_id", shared_id)
 
             platforms = config.get("platforms", [])
             if platforms:
-                return platforms, mcp_url, api_key, state_file, user_id, shared_id
+                return platforms, mcp_url, api_key, state_file, user_id
 
     # Default: OpenClaw only
     return [{
@@ -291,7 +280,7 @@ def load_platform_config(config_path: str = None) -> tuple[list[dict], str, str,
         "session_dir": DEFAULT_SESSIONS_DIR,
         "glob": "**/sessions/*.jsonl",
         "exclude": ["trajectory"]
-    }], mcp_url, api_key, state_file, user_id, shared_id
+    }], mcp_url, api_key, state_file, user_id
 
 
 def main():
@@ -302,11 +291,10 @@ def main():
     parser.add_argument("--mcp-url", default=None, help="Override MCP server URL")
     parser.add_argument("--api-key", default=None, help="Override API key")
     parser.add_argument("--user-id", default=None, help="Override default user ID")
-    parser.add_argument("--shared-id", default=None, help="Override shared consciousness ID")
     parser.add_argument("--interval", type=int, default=30, help="Scan interval in seconds (default: 30)")
     args = parser.parse_args()
 
-    platforms, mcp_url, api_key, state_file, user_id, shared_id = load_platform_config(args.config)
+    platforms, mcp_url, api_key, state_file, user_id = load_platform_config(args.config)
 
     # Apply CLI overrides
     if args.mcp_url:
@@ -315,8 +303,6 @@ def main():
         api_key = args.api_key
     if args.user_id:
         user_id = args.user_id
-    if args.shared_id is not None:
-        shared_id = args.shared_id
     if args.sessions_dir:
         platforms = [{"name": "custom", "session_dir": args.sessions_dir,
                        "glob": "**/*.jsonl", "exclude": ["trajectory"]}]
@@ -325,7 +311,7 @@ def main():
         log.error("No API key. Set KATRA_API_KEY env var or api_key in config.")
         sys.exit(1)
 
-    log.info(f"Katra Memory Watcher — {len(platforms)} platform(s), MCP: {mcp_url}, shared_id: {shared_id or '(none)'}")
+    log.info(f"Katra Memory Watcher — {len(platforms)} platform(s), MCP: {mcp_url}")
     state = load_state(state_file)
     total_stored = 0
 
@@ -336,13 +322,12 @@ def main():
             glob_pat = platform.get("glob", "**/*.jsonl")
             exclude = platform.get("exclude", ["trajectory"])
             plat_user_id = platform.get("user_id", user_id)
-            plat_shared_id = platform.get("shared_id", shared_id)
 
             files = find_session_files(session_dir, glob_pat, exclude)
 
             for filepath in files:
                 try:
-                    stored = process_file(filepath, state, mcp_url, api_key, plat_user_id, plat_shared_id)
+                    stored = process_file(filepath, state, mcp_url, api_key, plat_user_id)
                     total_stored += stored
                 except Exception as e:
                     log.error(f"Error [{name}] {os.path.basename(filepath)}: {e}")

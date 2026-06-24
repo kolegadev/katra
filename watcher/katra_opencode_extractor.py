@@ -28,7 +28,6 @@ DEFAULT_MCP_URL = os.environ.get("KATRA_MCP_URL", "http://localhost:3112/mcp")
 DEFAULT_API_KEY = os.environ.get("KATRA_API_KEY", "")
 DEFAULT_STATE_FILE = os.path.expanduser("~/.katra/opencode-extractor-state.json")
 DEFAULT_USER_ID = os.environ.get("KATRA_USER_ID", "opencode")
-DEFAULT_SHARED_ID = os.environ.get("KATRA_SHARED_ID", "")
 SCAN_INTERVAL = 30  # seconds
 MAX_TURN_TEXT_CHARS = 4000  # cap per-turn text to avoid huge payloads
 
@@ -195,8 +194,6 @@ def main():
     parser.add_argument("--mcp-url", default=DEFAULT_MCP_URL)
     parser.add_argument("--api-key", default=DEFAULT_API_KEY)
     parser.add_argument("--user-id", default=DEFAULT_USER_ID)
-    parser.add_argument("--shared-id", default=DEFAULT_SHARED_ID,
-                        help="Shared consciousness ID (requires Katra shared/hybrid mode)")
     args = parser.parse_args()
 
     if not args.api_key:
@@ -205,8 +202,7 @@ def main():
 
     log.info(
         f"Katra OpenCode Extractor v2 (delta) — DB: {args.db}, "
-        f"MCP: {args.mcp_url}, user_id: {args.user_id}, "
-        f"shared_id: {args.shared_id or '(none)'}"
+        f"MCP: {args.mcp_url}, user_id: {args.user_id}"
     )
 
     state = load_state(DEFAULT_STATE_FILE)
@@ -249,8 +245,6 @@ def main():
                 "source":     "opencode",
                 "tags":       ["conversation", "opencode"],
             }
-            if args.shared_id:
-                memory_args["shared_id"] = args.shared_id
 
             if client.call_tool("store_memory", memory_args):
                 state["processed_turns"][th] = True

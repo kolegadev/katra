@@ -241,6 +241,7 @@ On macOS, use `launchctl` / `~/Library/LaunchAgents` instead of systemd (see
 - [Security Policy](SECURITY.md) — Security architecture and vulnerability reporting
 - [Configuration Guide](CONFIGURATION.md) — All environment variables
 - [Deployment Guide](DEPLOYMENT.md) — Cloud, K8s, Raspberry Pi
+- [OpenClaw Integration Guide](OPENCLAW-INTEGRATION.md) — Complete OpenClaw setup with lessons learned
 - [Sleep Consolidation](SLEEP-CONSOLIDATION.md) — Reflective memory distillation
 - [Data Processing Pipelines](Data-Processing-Pipelines.md) — Full pipeline architecture
 - [SKILL.md](../SKILL.md) — Platform-specific agent setup

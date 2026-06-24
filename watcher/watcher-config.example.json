@@ -2,7 +2,6 @@
   "mcp_url": "http://localhost:3112/mcp",
   "api_key": "your-katra-api-key",
   "default_user_id": "default",
-  "shared_id": "",
   "state_file": "~/.katra/watcher-state.json",
   "platforms": [
     {
@@ -21,8 +20,7 @@
       "name": "opencode",
       "session_dir": "~/.opencode/sessions",
       "glob": "*.jsonl",
-      "exclude": [],
-      "shared_id": ""
+      "exclude": []
     },
     {
       "name": "codex",

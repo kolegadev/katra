@@ -166,7 +166,6 @@ Edit `~/.solomem/watcher-config.json` with your `api_key` and platforms:
   "mcp_url": "http://localhost:3112/mcp",
   "api_key": "YOUR_MCP_API_KEY",
   "user_id": "my-agent",
-  "shared_id": "",
   "platforms": [
     {
       "name": "openclaw",
@@ -328,10 +327,9 @@ Add to `~/.openclaw/openclaw.json`:
     "servers": {
       "katra": {
         "url": "http://localhost:3112/mcp",
-        "transport": "sse",
+        "transport": "streamable-http",
         "headers": {
-          "Authorization": "Bearer YOUR_MCP_API_KEY",
-          "Accept": "application/json, text/event-stream"
+          "Authorization": "Bearer YOUR_MCP_API_KEY"
         }
       }
     }
@@ -340,6 +338,27 @@ Add to `~/.openclaw/openclaw.json`:
 ```
 
 Restart: `openclaw gateway restart`
+
+**Disable OpenClaw's built-in memory:** OpenClaw's local `memory_search` (SQLite per-agent) conflicts with Katra. Disable it:
+
+```json
+{
+  "tools": {
+    "deny": ["memory_search"]
+  },
+  "plugins": {
+    "entries": {
+      "memory-core": {
+        "enabled": false
+      }
+    }
+  }
+}
+```
+
+Without this, agents see two competing memory systems causing confusion.
+
+> **Full integration guide:** [OPENCLAW-INTEGRATION.md](docs/OPENCLAW-INTEGRATION.md)
 
 > **Docker SSE tip:** If your agent runs inside Docker, use the Katra container's
 > direct IP instead of `localhost`:
