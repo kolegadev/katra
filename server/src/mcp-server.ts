@@ -46,7 +46,7 @@ import { getMemoryScope, buildScopeFilter, resolveSharedId, invalidateScopeCache
 import { llmService, get_llm_config_from_db, save_llm_config_to_db } from './services/llm-service.js';
 import { getEpisodicEventManager } from './services/episodic-event-manager.js';
 import { stableContentHash } from './services/content-hash-utils.js';
-import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured } from './utils/api-key-manager.js';
+import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured, validateKatraKey, isKatraAuthConfigured } from './utils/api-key-manager.js';
 import { ReflectionStore } from './services/reflection-store.js';
 import { SleepConsolidationService } from './services/sleep-consolidation-service.js';
 
@@ -78,6 +78,18 @@ function validateAuth(req: IncomingMessage): boolean {
       if (token && validateMcpKey(token)) return true;
     } catch { /* ignore */ }
   }
+  return false;
+}
+
+/**
+ * Admin-level auth — requires KATRA_API_KEY (not MCP_API_KEY).
+ * Used for high-privilege operations: memory scope changes, LLM config.
+ */
+function validateAdminAuth(authHeader?: string, token?: string): boolean {
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    if (validateKatraKey(authHeader.slice(7))) return true;
+  }
+  if (token && validateKatraKey(token)) return true;
   return false;
 }
 
@@ -1647,6 +1659,10 @@ async function handleGetMemoryScope(): Promise<TextContent[]> {
 }
 
 async function handleSetMemoryScope(args: unknown): Promise<TextContent[]> {
+  // Admin-only operation — reject if KATRA_API_KEY is not configured
+  if (!isKatraAuthConfigured()) {
+    return [{ type: 'text', text: '⛔ set_memory_scope requires KATRA_API_KEY to be configured. This is an admin-level operation.' }];
+  }
   const input = SetMemoryScopeInput.parse(args);
 
   // Validate: shared/hybrid mode requires shared_id
@@ -1724,6 +1740,10 @@ async function handleGetLLMConfig(): Promise<TextContent[]> {
 }
 
 async function handleConfigureLLM(args: unknown): Promise<TextContent[]> {
+  // Admin-only operation — reject if KATRA_API_KEY is not configured
+  if (!isKatraAuthConfigured()) {
+    return [{ type: 'text', text: '⛔ configure_llm requires KATRA_API_KEY to be configured. This is an admin-level operation.' }];
+  }
   const input = ConfigureLLMInput.parse(args);
 
   // Apply defaults for known providers
@@ -2308,8 +2328,18 @@ async function startStdioServer(): Promise<void> {
 
 function readRequestBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let totalSize = 0;
+    req.on('data', (chunk: Buffer) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error('Request body exceeds 10MB limit'));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => {
       try {
         const raw = Buffer.concat(chunks).toString('utf-8');

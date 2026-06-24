@@ -5,6 +5,7 @@ import { dispatch_service, DispatchContext } from '../services/dispatch-service.
 import { getSessionIngestionService } from '../services/session-ingestion-service.js';
 import { getTenantContext } from '../database/tenant-context.js';
 import { create_rate_limiter } from '../middleware/rate-limit.js';
+import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
 
 export const create_ingestion_routes = (): Hono => {
   const router = new Hono();
@@ -55,17 +56,12 @@ export const create_ingestion_routes = (): Hono => {
         }, 400);
       }
 
-      if (!body.user_id || typeof body.user_id !== 'string') {
-        return c.json({
-          success: false,
-          error: 'user_id is required and must be a string'
-        }, 400);
-      }
-
+      const userId = DEFAULT_USER_ID;
+      const tenantCtx = getTenantContext();
       // Build extraction context
       const extraction_context: ExtractionContext = {
         session_id: body.session_id,
-        user_id: body.user_id,
+        user_id: userId,
         shared_id: body.shared_id,
         timestamp: new Date(),
         conversation_history: body.conversation_history || [],
@@ -73,7 +69,7 @@ export const create_ingestion_routes = (): Hono => {
         extraction_focus: body.extraction_focus
       };
 
-      console.log(`🔄 Starting ingestion (${Date.now() - startTime}ms): session ${body.session_id}, user ${body.user_id}${body.shared_id ? ', shared ' + body.shared_id : ''}`);
+      console.log(`🔄 Starting ingestion (${Date.now() - startTime}ms): session ${body.session_id}, user ${userId}${body.shared_id ? ', shared ' + body.shared_id : ''}`);
       console.log(`📄 Input text length: ${body.input_text.length} characters`);
 
       // Phase 1: Extract structured data from input with timeout protection
@@ -470,7 +466,7 @@ export const create_ingestion_routes = (): Hono => {
       // Resolve user_id from tenant context (multi-tenant) or explicit request body field
       const tenantCtx = getTenantContext();
       const body = await c.req.json().catch(() => ({}));
-      const userId: string | undefined = body.user_id || tenantCtx?.tenant_id;
+      const userId = DEFAULT_USER_ID;
       if (!userId) {
         return c.json({
           success: false,

@@ -60,7 +60,8 @@ export const create_recall_routes = (): Hono => {
   app.post('/remember', async (c) => {
     try {
       const body = await c.req.json();
-      const { query, sessionId, userId = DEFAULT_USER_ID } = body;
+      const { query, sessionId } = body;
+      const userId = DEFAULT_USER_ID;
       
       if (!query || typeof query !== 'string') {
         return c.json({
@@ -381,14 +382,14 @@ export const create_recall_routes = (): Hono => {
         }, 400);
       }
 
-      const { query, searchTypes = ['episodic', 'semantic', 'knowledge_graph', 'asset'], limit = 50, template = 'default', userId, user_id } = validation.data;
+      const { query, searchTypes = ['episodic', 'semantic', 'knowledge_graph', 'asset'], limit = 50, template = 'default' } = validation.data;
 
-      // Build search-focused context (userId enables user-scoped semantic search)
+      // Build search-focused context with server-scoped userId
       const context = {
         searchTypes,
         limit,
         searchMode: 'semantic',
-        userId: userId || user_id
+        userId: DEFAULT_USER_ID
       };
 
       const informationNeed = `Search for: ${query}`;
@@ -441,7 +442,7 @@ export const create_recall_routes = (): Hono => {
       const queryParams = c.req.query();
       
       const validation = TimelineRecallSchema.safeParse({
-        userId: queryParams.userId,
+        userId: DEFAULT_USER_ID,
         sessionId: queryParams.sessionId,
         startDate: queryParams.startDate,
         endDate: queryParams.endDate,

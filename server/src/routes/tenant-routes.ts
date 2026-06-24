@@ -123,6 +123,10 @@ export function create_tenant_routes(): Hono {
    * POST /api/v1/tenants/:id/regenerate-key — Regenerate API key
    */
   app.post('/:id/regenerate-key', async (c) => {
+    const confirm = c.req.query('confirm');
+    if (confirm !== 'true') {
+      return c.json({ success: false, error: 'Add ?confirm=true to regenerate the API key. This will invalidate the existing key.' }, 400);
+    }
     const result = await regenerateApiKey(c.req.param('id'));
     if (!result) {
       return c.json({ success: false, error: 'Tenant not found' }, 404);

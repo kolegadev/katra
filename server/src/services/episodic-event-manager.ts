@@ -164,6 +164,19 @@ export interface EventCreationResult {
   action_taken: 'created' | 'updated_metadata' | 'no_change' | 'cascade_blocked';
 }
 
+/**
+ * Strip internal fields from caller-supplied metadata to prevent
+ * injection of `processed`, `created_at`, `cascade_depth`, etc.
+ */
+function sanitizeCallerMetadata(meta: Record<string, unknown>): Record<string, unknown> {
+  const blocked = ['processed', 'created_at', 'updated_at', 'cascade_depth', 'processing_version', 'duplicate_prevention_applied'];
+  const safe: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(meta)) {
+    if (!blocked.includes(k)) safe[k] = v;
+  }
+  return safe;
+}
+
 export class EpisodicEventManager {
   private db: Db;
   private collection: Collection;
@@ -276,11 +289,11 @@ export class EpisodicEventManager {
         cascade_depth: 0,
         processing_version: 1,
         duplicate_prevention_applied: ['enhanced_content_hash', 'cascade_detection'],
-        ...eventData.metadata
+        ...(eventData.metadata ? sanitizeCallerMetadata(eventData.metadata) : {})
       },
       processing_lineage: {
         derived_from_events: [],
-        ...eventData.metadata?.processing_lineage
+        ...(eventData.metadata?.processing_lineage || {})
       }
     };
 

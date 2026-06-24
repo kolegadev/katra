@@ -6,7 +6,7 @@ import { llmService } from '../services/llm-service.js';
 import { backgroundProcessor } from '../services/background-processor.js';
 import { IndexManager } from '../database/index-management.js';
 import { get_error_message, get_error_stack } from '../utils/error-utils.js';
-import { getMemoryScope, invalidateScopeCache } from '../services/memory-scope-service.js';
+import { getMemoryScope, invalidateScopeCache, DEFAULT_USER_ID } from '../services/memory-scope-service.js';
 import { get_llm_config_from_db, save_llm_config_to_db, type LLMConfig } from '../services/llm-service.js';
 import { entityResolver } from '../services/entity-resolver.js';
 import { create_rate_limiter } from '../middleware/rate-limit.js';
@@ -685,15 +685,7 @@ export const create_admin_routes = (): Hono => {
   router.post('/resolve-entities', async (c) => {
     try {
       const body = await c.req.json();
-      const userId = body.user_id;
-
-      if (!userId) {
-        return c.json({
-          success: false,
-          error: 'Missing required field: user_id'
-        }, 400);
-      }
-
+      const userId = DEFAULT_USER_ID;
       const result = await entityResolver.batchResolveEntities(userId);
 
       return c.json({

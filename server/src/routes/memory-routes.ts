@@ -361,9 +361,10 @@ export const create_memory_routes = (): Hono => {
     router.post('/episodic/events', async (c) => {
         try {
             const body = await c.req.json();
-            const { user_id, session_id, event_type, content, metadata } = body;
+            const { session_id, event_type, content, metadata } = body;
+            const user_id = DEFAULT_USER_ID;
 
-            if (!user_id || !event_type || !content) {
+            if (!event_type || !content) {
                 return c.json({
                     success: false,
                     error: 'Missing required fields: user_id, event_type, content'
@@ -490,7 +491,7 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/episodic/events', async (c) => {
         try {
-            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
+            const user_id = DEFAULT_USER_ID;
             const from_str = c.req.query('from');
             const to_str = c.req.query('to');
             const limit = parseInt(c.req.query('limit') || '50');
@@ -699,7 +700,7 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/time-block-summaries', async (c) => {
         try {
-            const user_id = c.req.query('user_id');
+            const user_id = DEFAULT_USER_ID;
             const from_str = c.req.query('from');
             const to_str = c.req.query('to');
             const block_type = c.req.query('block_type') as 'day' | 'week' | 'month' | undefined;
@@ -948,7 +949,7 @@ export const create_memory_routes = (): Hono => {
     router.get('/stats', async (c) => {
         try {
             const db = get_database();
-            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
+            const user_id = DEFAULT_USER_ID;
             const scopeFilter = await buildScopeFilter(user_id);
 
             console.log('🔍 Memory stats endpoint called for user:', user_id);
@@ -1306,7 +1307,7 @@ export const create_memory_routes = (): Hono => {
     router.get('/knowledge-graph', async (c) => {
         try {
             const db = get_database();
-            const user_id = c.req.query('user_id');
+            const user_id = DEFAULT_USER_ID;
             const limit = parseInt(c.req.query('limit') || '100');
 
             const effective_user_id = user_id || DEFAULT_USER_ID;
@@ -1870,7 +1871,7 @@ export const create_memory_routes = (): Hono => {
 
             const db = get_database();
             const body = await c.req.json();
-            const user_id = body.user_id || DEFAULT_USER_ID;
+            const user_id = DEFAULT_USER_ID;
             const session_id = body.session_id || `demo_session_${Date.now()}`;
 
             console.log('🚀 Creating test session data with session_id:', session_id);
@@ -2001,7 +2002,7 @@ export const create_memory_routes = (): Hono => {
      */
     router.get('/semantic/facts', async (c) => {
         try {
-            const user_id = c.req.query('user_id') || DEFAULT_USER_ID;
+            const user_id = DEFAULT_USER_ID;
             const limit = parseInt(c.req.query('limit') || '50');
             const scopeFilter = await buildScopeFilter(user_id);
 

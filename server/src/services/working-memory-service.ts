@@ -124,9 +124,25 @@ export class WorkingMemoryService {
         const item_id = uuidv4();
         const now = new Date();
         
-        // Calculate content size
+        // Reject dangerous content to prevent prototype pollution and DoS
+        if (content === null || content === undefined) {
+          throw new Error('Content cannot be null or undefined');
+        }
+        if (typeof content === 'object' && !Array.isArray(content)) {
+          const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+          for (const key of dangerousKeys) {
+            if (key in content) {
+              throw new Error(`Rejected dangerous content key: ${key}`);
+            }
+          }
+        }
+        
+        // Calculate content size — cap at 5MB
         const content_json = JSON.stringify(content);
         const size_bytes = Buffer.byteLength(content_json, 'utf8');
+        if (size_bytes > 5 * 1024 * 1024) {
+          throw new Error(`Content exceeds maximum size of 5MB (${(size_bytes / 1024 / 1024).toFixed(1)}MB)`);
+        }
         
         const memory_item: WorkingMemoryItem = {
             id: item_id,
