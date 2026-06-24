@@ -18,7 +18,7 @@ WORKDIR /app
 
 # Copy package files and install ALL deps (including devDeps for build)
 COPY server/package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copy source and build
 COPY server/ ./
@@ -35,7 +35,7 @@ WORKDIR /app
 
 # Copy package files and install production deps only
 COPY server/package*.json ./
-RUN npm ci --production && npm cache clean --force
+RUN npm install --production && npm cache clean --force
 
 # Copy built artifacts from builder stage
 COPY --from=builder /app/build ./build

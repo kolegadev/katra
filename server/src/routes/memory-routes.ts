@@ -29,11 +29,11 @@ export const create_memory_routes = (): Hono => {
     const router = new Hono();
 
     router.use('*', async (c, next) => {
-        const result = await validateKatraKey(
-            c.req.header('Authorization') ?? '',
-            c.req.query('token') ?? undefined
-        );
-        if (!result.valid) {
+        const authHeader = c.req.header('Authorization') ?? '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+        const queryToken = c.req.query('token') ?? '';
+        const tokenToValidate = token || queryToken;
+        if (!validateKatraKey(tokenToValidate)) {
             return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
         }
         return next();

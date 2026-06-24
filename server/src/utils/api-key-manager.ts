@@ -102,7 +102,7 @@ export async function ensureApiKeys(): Promise<ApiKeyResult> {
     const mcpHash = hashApiKey(mcpApiKey);
     const katraHash = hashApiKey(katraApiKey);
     validators = { mcpHash, katraHash };
-    await persistHashes(mcpHash, katraHash);
+await persistHashes(mcpHash, katraHash);
     return { mcpApiKey, katraApiKey, generated: false };
   }
 

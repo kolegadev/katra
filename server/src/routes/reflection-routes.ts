@@ -16,11 +16,11 @@ export const create_reflection_routes = (): Hono => {
   // Auth middleware + rate limiting
   router.use('*', create_rate_limiter({ keyPrefix: 'reflection', max: 60, windowMs: 60_000 }));
   router.use('*', async (c, next) => {
-    const result = await validateKatraKey(
-      c.req.header('Authorization') ?? '',
-      c.req.query('token') ?? undefined
-    );
-    if (!result.valid) {
+    const authHeader = c.req.header('Authorization') ?? '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+    const queryToken = c.req.query('token') ?? undefined;
+    const tokenToValidate = token || queryToken || '';
+    if (!validateKatraKey(tokenToValidate)) {
       return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
     }
     return next();
