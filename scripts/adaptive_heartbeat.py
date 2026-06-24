@@ -292,6 +292,9 @@ print(r.insertedId);
 ''')
         executed.setdefault("hashes", []).append(ahash)
         _save_executed(executed)
+        
+        # Post bulletin so the assigned agent discovers this task
+        _post_bulletin(top['entity'], top['emotion'], top['score'], assigned, affinity['confidence'], result)
     
     return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain, "assigned": assigned}
 
@@ -303,6 +306,26 @@ def _load_state():
 def _save_state(s):
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w") as f: json.dump(s, f, indent=2)
+
+def _post_bulletin(entity, emotion, salience, assigned, confidence, result):
+    """Post a task bulletin to auto-journal so agents discover it on next session."""
+    content = f"""[AUTONOMOUS TASK BULLETIN — from adaptive heartbeat]
+Entity: {entity}
+Emotion: {emotion} (salience: {salience:.3f})
+Assigned to: {assigned} (confidence: {confidence})
+Status: {result['status']}
+Output: {result['output'][:300]}
+Pulse time: {datetime.now(timezone.utc).isoformat()}"""
+    
+    _mongo_query(f'''
+var r = db.agent_journal_auto.insertOne({{
+  user_id: "{assigned}",
+  entry: {json.dumps(content)},
+  source: "auto",
+  tags: ["heartbeat", "task-allocation", "{entity}"],
+  created_at: new Date()
+}});
+''')
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():

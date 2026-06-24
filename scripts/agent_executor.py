@@ -159,6 +159,31 @@ db.episodic_events.updateOne(
 print("Task completed: " + r.insertedId);
 ''')
 
+def _write_bulletin(task, result):
+    """Write a task bulletin to auto-journal so KolegaCode's bridge picks it up.
+    
+    The Kolega Code bridge queries get_auto_journal on UserPromptSubmit.
+    This entry ensures autonomous tasks appear in KolegaCode's context."""
+    
+    content = f"""[AUTONOMOUS TASK BULLETIN]
+Agent: {AGENT_ID}
+Entity: {task['entity']}
+Confidence: {task['confidence']}
+Status: {result['status']}
+Action: {result['output'][:300]}
+Timestamp: {datetime.now(timezone.utc).isoformat()}"""
+    
+    _mongo_query(f'''
+var r = db.agent_journal_auto.insertOne({{
+  user_id: "{AGENT_ID}",
+  entry: {json.dumps(content)},
+  source: "auto",
+  tags: ["autonomous", "task-execution", "{task['entity']}"],
+  created_at: new Date()
+}});
+print("Bulletin posted: " + r.insertedId);
+''')
+
 def _load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f: return json.load(f)
@@ -195,9 +220,10 @@ def main():
             print(f"  Status: {result['status']}")
             
             store_result(task, result)
+            _write_bulletin(task, result)
             state["tasks_completed"] += 1
             _save_state(state)
-            print(f"  📝 Result stored to shared memory")
+            print(f"  📝 Result stored and bulletin posted to shared memory")
         else:
             if cycle % 10 == 0:
                 print(f"  ⏳ No tasks assigned. {state['tasks_completed']} completed so far. ({cycle} checks)")
