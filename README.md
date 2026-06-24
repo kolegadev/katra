@@ -62,9 +62,9 @@ Add Katra to your agent's MCP config:
 }
 ```
 
-Your agent now has **29 MCP tools** — store memories, search by keyword or semantic
-similarity, recall by time range, explore a knowledge graph, detect patterns, configure
-LLM provider, and more.
+Your agent now has **35 MCP tools** — store memories, search by keyword or semantic
+similarity, recall by time range, explore a knowledge graph, detect patterns, run
+sleep consolidation for reflective self-understanding, configure LLM provider, and more.
 
 ### Platform-Specific Guides
 
@@ -255,7 +255,8 @@ Each platform can have its own `user_id` for identity mode isolation.
 - **Vector Search** — Semantic similarity search (local embeddings, no API key needed)
 - **11-Collection Search** — Comprehensive search across all memory stores, not just 1-2
 - **Background Processing** — Auto-extracts facts, builds graph, generates summaries
-- **29 MCP Tools** — Store, search, recall, explore, configure LLM — all via standardized protocol
+- **Sleep Consolidation** — Daily/weekly/monthly reflective distillation of experience into emotional understanding, philosophical insights, and self-narrative (see [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md))
+- **35 MCP Tools** — Store, search, recall, explore, reflect, configure LLM — all via standardized protocol
 - **Identity Modes** — Personal, shared, or hybrid memory across multiple agents
 - **Dashboard** — Web UI for stats, memory scope, and system health
 - **Portable Data** — Single `DATA_DIR` env var controls where all data lives
@@ -309,8 +310,8 @@ To move Katra to a new machine: copy the `DATA_DIR` directory, copy `.env`, run 
 katra/
 ├── server/                  TypeScript server (esbuild, Docker)
 │   ├── src/
-│   │   ├── mcp-server.ts    29 MCP tools (store, search, recall, graph, scope)
-│   │   ├── services/        26 core memory services
+│   │   ├── mcp-server.ts    35 MCP tools (store, search, recall, graph, reflection, scope)
+│   │   ├── services/        28 core memory services (incl. sleep-consolidation, reflection-store)
 │   │   ├── routes/          REST API + admin + ingestion + health
 │   │   └── database/        MongoDB, Redis, indexes, migrations
 │   └── esbuild.config.mjs   Pi-compatible build
@@ -325,7 +326,7 @@ katra/
 └── docs/                    Full documentation
 ```
 
-## MCP Tools (29)
+## MCP Tools (35)
 
 ### Storage
 | Tool | Description |
@@ -369,6 +370,16 @@ katra/
 |------|-------------|
 | `get_llm_config` | Get current LLM provider config (key masked) |
 | `configure_llm` | Set LLM provider, API key, base URL, model — applies live |
+
+### Reflection (Sleep Consolidation)
+| Tool | Description |
+|------|-------------|
+| `get_daily_reflection` | Get the latest reflective journal entry for a period |
+| `get_emotional_context` | Get how the AI "feels" about a person, project, or concept |
+| `get_philosophical_insights` | Query abstracted principles emerging across reflection periods |
+| `get_unresolved_threads` | Get open questions and tensions that persist |
+| `get_reflection_arc` | Trace the emotional trajectory for an entity over time |
+| `trigger_reflection` | Manually run a sleep consolidation for a time period |
 
 ### System
 | Tool | Description |
@@ -439,7 +450,8 @@ ingress with path routing, HPA, and PDB. See [Deployment Guide](docs/DEPLOYMENT.
 
 - [Quick Start Guide](docs/QUICKSTART.md) — 5-minute setup
 - [Architecture](docs/ARCHITECTURE.md) — How it works under the hood
-- [MCP Tools Reference](docs/MCP-TOOLS.md) — All 29 tools with examples
+- [MCP Tools Reference](docs/MCP-TOOLS.md) — All 35 tools with examples
+- [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md) — Reflective memory distillation — principles, architecture, and usage
 - [REST API Reference](docs/API-REFERENCE.md) — HTTP endpoints
 - [Configuration Guide](docs/CONFIGURATION.md) — All environment variables
 - [Deployment Guide](docs/DEPLOYMENT.md) — Docker, cloud, K8s
