@@ -1,7 +1,7 @@
 #!/bin/bash
 # Broad memory recall across all test user IDs
 MCP="http://localhost:3112/mcp"
-KEY="katra-mcp-key-2026"
+KEY="${KATRA_MCP_KEY:-your-mcp-key}"
 
 SID=$(curl -s -D - -o /dev/null -X POST "$MCP" \
   -H "Authorization: Bearer $KEY" \

@@ -1,10 +1,10 @@
 #!/bin/bash
 # Katra REST API Memory Layers Test — validates all REST memory layers on port 9012
 set -euo pipefail
-export PATH="/Users/johnpellew/homebrew/bin:$PATH"
+export PATH="$HOME/homebrew/bin:$PATH"
 
 API_URL="http://localhost:9012"
-API_KEY="katra-admin-key-2026"
+API_KEY="${KATRA_ADMIN_KEY:-your-admin-key}"
 TEST_USER="rest-test-suite"
 TEST_SESSION="rest-test-$(date +%s)"
 PASS=0

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Katra Full Systems Test — validates all memory layers and features
 set -euo pipefail
-export PATH="/Users/johnpellew/homebrew/bin:$PATH"
+export PATH="$HOME/homebrew/bin:$PATH"
 
 MCP_URL="http://localhost:3112/mcp"
 API_URL="http://localhost:9012"
-MCP_KEY="katra-mcp-key-2026"
-API_KEY="katra-admin-key-2026"
+MCP_KEY="${KATRA_MCP_KEY:-your-mcp-key}"
+API_KEY="${KATRA_ADMIN_KEY:-your-admin-key}"
 SESSION_ID=""
 PASS=0
 FAIL=0
@@ -389,10 +389,10 @@ ok "get_transaction_log responds"
 header "14. PORTABLE DATA — DATA_DIR"
 # ════════════════════════════════════════════════
 
-if [ -d "/Users/johnpellew/Projects/katra/data" ]; then
-  DATA_DIRS=$(ls -1 /Users/johnpellew/Projects/katra/data/ 2>/dev/null | tr '\n' ' ')
+if [ -d "$HOME/Projects/katra/data" ]; then
+  DATA_DIRS=$(ls -1 $HOME/Projects/katra/data/ 2>/dev/null | tr '\n' ' ')
   ok "DATA_DIR exists ($DATA_DIRS)"
-  MONGO_SIZE=$(du -sh /Users/johnpellew/Projects/katra/data/mongo 2>/dev/null | awk '{print $1}')
+  MONGO_SIZE=$(du -sh $HOME/Projects/katra/data/mongo 2>/dev/null | awk '{print $1}')
   ok "MongoDB data size: $MONGO_SIZE"
 else
   fail "DATA_DIR" "Not found"

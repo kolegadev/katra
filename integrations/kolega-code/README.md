@@ -25,7 +25,7 @@ uv pip install --python ~/.local/share/uv/tools/kolega-code/bin/python -e .
    ```json
    {
      "mcp_url": "http://localhost:3112/mcp",
-     "api_key": "katra-mcp-key-2026",
+     "api_key": "your-katra-mcp-api-key",
      "user_id": "kolega-agent",
      "shared_id": "my-team",
      "enabled": true,
@@ -75,11 +75,11 @@ Kolega Code continues normally.
 
 ```bash
 cd integrations/kolega-code
-/Users/johnpellew/.local/share/uv/tools/kolega-code/bin/python scripts/test_hook.py
+~/.local/share/uv/tools/kolega-code/bin/python scripts/test_hook.py
 ```
 
 To inspect raw Katra tool responses:
 
 ```bash
-/Users/johnpellew/.local/share/uv/tools/kolega-code/bin/python scripts/inspect_katra.py
+~/.local/share/uv/tools/kolega-code/bin/python scripts/inspect_katra.py
 ```

@@ -7,12 +7,14 @@ import { ReflectionStore } from '../services/reflection-store.js';
 import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
 import { validateKatraKey } from '../utils/api-key-manager.js';
 import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
+import { create_rate_limiter } from '../middleware/rate-limit.js';
 
 export const create_reflection_routes = (): Hono => {
   const router = new Hono();
   const store = ReflectionStore.get_instance();
 
-  // Auth middleware — require valid API key
+  // Auth middleware + rate limiting
+  router.use('*', create_rate_limiter({ keyPrefix: 'reflection', max: 60, windowMs: 60_000 }));
   router.use('*', async (c, next) => {
     const result = await validateKatraKey(
       c.req.header('Authorization') ?? '',
@@ -31,14 +33,15 @@ export const create_reflection_routes = (): Hono => {
     try {
       const userId = DEFAULT_USER_ID;
       const periodType = c.req.query('period_type');
-      const limit = parseInt(c.req.query('limit') || '10');
+      const limit = Math.min(parseInt(c.req.query('limit') || '10'), 100);
       const from = c.req.query('from') ? new Date(c.req.query('from')!) : undefined;
       const to = c.req.query('to') ? new Date(c.req.query('to')!) : undefined;
 
       const journals = await store.getJournals(userId, { periodType, limit, from, to });
       return c.json({ success: true, count: journals.length, journals });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Error retrieving journals:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -53,7 +56,8 @@ export const create_reflection_routes = (): Hono => {
       const journal = await store.getLatestJournal(userId, periodType);
       return c.json({ success: true, journal });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -68,7 +72,8 @@ export const create_reflection_routes = (): Hono => {
       const context = await store.getEmotionalContext(userId, entityName);
       return c.json({ success: true, ...context });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -81,12 +86,13 @@ export const create_reflection_routes = (): Hono => {
       const userId = DEFAULT_USER_ID;
       const domain = c.req.query('domain');
       const status = c.req.query('status');
-      const limit = parseInt(c.req.query('limit') || '10');
+      const limit = Math.min(parseInt(c.req.query('limit') || '10'), 100);
 
       const insights = await store.getInsights(userId, { domain, status, limit });
       return c.json({ success: true, count: insights.length, insights });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -100,7 +106,8 @@ export const create_reflection_routes = (): Hono => {
       const threads = await store.getUnresolvedThreads(userId);
       return c.json({ success: true, count: threads.length, threads });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -112,12 +119,13 @@ export const create_reflection_routes = (): Hono => {
     try {
       const entityName = c.req.param('entity');
       const userId = DEFAULT_USER_ID;
-      const limit = parseInt(c.req.query('limit') || '10');
+      const limit = Math.min(parseInt(c.req.query('limit') || '10'), 100);
 
       const arc = await store.getReflectionArc(userId, entityName, limit);
       return c.json({ success: true, entity: entityName, points: arc.length, arc });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 
@@ -131,7 +139,8 @@ export const create_reflection_routes = (): Hono => {
       const nodes = await store.getAllReflectionNodes(userId);
       return c.json({ success: true, count: nodes.length, nodes });
     } catch (error: any) {
-      return c.json({ success: false, error: error.message }, 500);
+      console.error('Reflection route error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });
 

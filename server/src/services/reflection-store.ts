@@ -79,8 +79,10 @@ export class ReflectionStore {
   async upsertReflectionNode(node: ReflectionNode): Promise<void> {
     const db = get_database();
     const now = new Date();
+    // Sanitize entity name to prevent NoSQL injection via field paths
+    const safeEntityName = String(node.entity_name).slice(0, 200);
     await db.collection('reflection_nodes').updateOne(
-      { user_id: node.user_id, entity_name: node.entity_name },
+      { user_id: node.user_id, entity_name: safeEntityName },
       {
         $set: {
           entity_type: node.entity_type,
@@ -160,11 +162,14 @@ export class ReflectionStore {
   async upsertReflectionEdge(edge: ReflectionEdge): Promise<void> {
     const db = get_database();
     const now = new Date();
+    // Sanitize entity names to prevent NoSQL injection via field paths
+    const safeSource = String(edge.source_entity).slice(0, 200);
+    const safeTarget = String(edge.target_entity).slice(0, 200);
     await db.collection('reflection_edges').updateOne(
       {
         user_id: edge.user_id,
-        source_entity: edge.source_entity,
-        target_entity: edge.target_entity,
+        source_entity: safeSource,
+        target_entity: safeTarget,
         edge_type: edge.edge_type,
       },
       {

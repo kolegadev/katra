@@ -40,7 +40,7 @@ export const connect_to_mongodb = async (): Promise<Db | null> => {
   if (!mongodb_uri && !fallback_uri) {
     throw new Error('MONGODB_URI environment variable is required');
   }
-  const raw_database_name = process.env.DATABASE_NAME || 'db-nimble-cascade-ltj335';
+  const raw_database_name = process.env.DATABASE_NAME || 'katra';
   const database_name = normalize_database_name(raw_database_name);
 
   console.log('🔗 Attempting to connect to MongoDB...');

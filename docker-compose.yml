@@ -22,7 +22,7 @@ services:
       - ${DATA_DIR:-./data}/mongo:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-katra-local-dev}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-change-me}
     command: ["--bind_ip_all", "--auth"]
     networks:
       - katra-net
@@ -46,8 +46,8 @@ services:
     volumes:
       - ${DATA_DIR:-./data}/minio:/data
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASS:-katra-local-dev}
+      MINIO_ROOT_USER: ${MINIO_USER:-change-me}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS:-change-me}
     command: server /data --console-address ":9001"
     networks:
       - katra-net

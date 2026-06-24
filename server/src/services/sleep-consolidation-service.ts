@@ -6,11 +6,18 @@
  * identity shifts — a second-order knowledge graph capturing *meaning*.
  * 
  * Mirrors how human sleep consolidates experience into intuition and self-knowledge.
+ * 
+ * ⚠️ DATA EGRESS NOTICE: This service sends user conversation summaries, semantic
+ * facts, entity names, and prior reflections to the configured LLM provider
+ * (DeepSeek, OpenAI, Moonshot, Ollama, or custom). No PII redaction is applied.
+ * For fully local operation, configure the LLM provider to use a local Ollama
+ * instance. See SECURITY.md for details.
  */
 
 import { get_database } from '../database/connection.js';
 import { llmService } from './llm-service.js';
 import { ReflectionStore } from './reflection-store.js';
+import { DEFAULT_USER_ID } from './memory-scope-service.js';
 import type {
   GatheredData,
   ReflectionLLMOutput,
@@ -20,8 +27,6 @@ import type {
   ReflectionEdge,
   PhilosophicalInsight,
 } from '../types/memory.js';
-
-const DEFAULT_USER_ID = process.env.SOLOMEM_USER_ID || 'default';
 
 interface ScheduleConfig {
   daily: { hour: number; minute: number };
@@ -276,7 +281,7 @@ export class SleepConsolidationService {
     // Always try to get yesterday's daily reflection for continuity
     const priorJournal = await this.store.getLatestJournal(userId, 'daily');
     if (priorJournal?.narrative) {
-      priorJournalNarrative = priorJournal.narrative;
+      priorJournalNarrative = priorJournal.narrative.slice(0, 2000); // Truncate to prevent token bloat
     }
 
     // Unresolved threads from prior period

@@ -289,7 +289,7 @@ export const create_admin_routes = (): Hono => {
         test_result: testResult,
         environment_check: {
           api_key_present: !!process.env.MOONSHOT_API_KEY,
-          api_key_prefix: process.env.MOONSHOT_API_KEY ? process.env.MOONSHOT_API_KEY.substring(0, 8) + '...' : 'none'
+          api_key_configured: !!process.env.MOONSHOT_API_KEY
         }
       });
       

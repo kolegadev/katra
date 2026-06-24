@@ -3,10 +3,16 @@ build/
 dist/
 .env
 .env.local
+.env.*
 *.log
 .DS_Store
 data/
 gitea-data/
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
 
 # Terraform
 terraform/aws/.terraform/

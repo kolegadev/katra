@@ -109,7 +109,7 @@ async function main() {
   // Simple API key auth (skip for health endpoints)
   app.use('/api/*', async (c, next) => {
     // Skip auth for health checks
-    if (c.req.path === '/api/v1/health' || c.req.path.startsWith('/api/v1/ingestion-timeout')) {
+    if (c.req.path === '/api/v1/health') {
       return next();
     }
 

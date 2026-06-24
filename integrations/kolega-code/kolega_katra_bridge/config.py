@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MCP_URL = "http://localhost:3112/mcp"
-DEFAULT_API_KEY = "katra-mcp-key-2026"
+DEFAULT_API_KEY = ""  # Must be configured via katra-hook.json — no default key
 DEFAULT_USER_ID = "kolega-agent"
 DEFAULT_TIMEOUT_SECONDS = 8
 DEFAULT_MAX_CONTEXT_TOKENS = 2500

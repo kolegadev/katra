@@ -1,7 +1,7 @@
 #!/bin/bash
 # Query Katra memory for topics covered since installation
 MCP="http://localhost:3112/mcp"
-KEY="katra-mcp-key-2026"
+KEY="${KATRA_MCP_KEY:-your-mcp-key}"
 
 SID=$(curl -s -D - -o /dev/null -X POST "$MCP" \
   -H "Authorization: Bearer $KEY" \
