@@ -367,14 +367,12 @@ def main():
         if args.max_cycles and cycle >= args.max_cycles:
             break
         
-        # Adaptive sleep — the core innovation
+        # Adaptive sleep — the core innovation. No fixed timer.
         interval = pulse.get("interval", BASE_INTERVAL) if pulse else BASE_INTERVAL
         next_pulse = datetime.now(timezone.utc).timestamp() + interval
         next_str = datetime.fromtimestamp(next_pulse, timezone.utc).strftime("%H:%M:%S")
         print(f"\n  💤 Sleeping for {interval}s ({interval/60:.0f}m). Next pulse: {next_str} UTC")
-        time.sleep(min(interval, 10))  # Cap display sleep at 10s for demo
-        if interval > 10:
-            print(f"  (Demo mode: truncated from {interval/60:.0f}m to 10s)")
+        time.sleep(interval)
         
         if args.dry_run:
             break  # Only one cycle in dry run
