@@ -543,6 +543,30 @@ The Katra server's background processor automatically:
 | Embeddings 🔴 after rebuild | Container recreated, cache lost | Call `store_memory` once to re-download |
 | LLM 🔴 in health | No LLM configured | Call `configure_llm` MCP tool or use dashboard |
 | LLM 🔴 but key is set | Validation failed (bad key?) | Call `get_llm_config` MCP tool to check status |
+| Agent executor not running | Syntax error or missing deps | Check `/tmp/katra-agent-executor.log` |
+
+---
+
+## Autonomous Agent Loop (Agent Executor)
+
+Enable your agent to autonomously discover and execute tasks from shared memory:
+
+```bash
+# One env var per agent
+export KATRA_AGENT_ID="your-agent-id"
+
+# Optional: wake up your agent when tasks are discovered
+export TRIGGER_COMMAND="bash scripts/triggers/terminal.sh"  # TTY injection
+export AGENT_PROCESS_PATTERN="your-process-name"             # pgrep pattern
+
+# Run once (test)
+python3 scripts/agent_executor.py --once
+
+# Run as daemon (production)
+python3 scripts/agent_executor.py
+```
+
+Works with KolegaCode, OpenCode, Claude Code, OpenClaw, or any LLM that stores memories in Katra. See [Autonomous Loop](docs/AUTONOMOUS-LOOP.md) for full documentation.
 
 ---
 

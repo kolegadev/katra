@@ -268,6 +268,8 @@ Each platform can have its own `user_id` for identity mode isolation.
 - **Background Processing** — Auto-extracts facts, builds graph, generates summaries
 - **Sleep Consolidation** — Daily/weekly/monthly reflective distillation of experience into emotional understanding, philosophical insights, and self-narrative (see [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md))
 - **35 MCP Tools** — Store, search, recall, explore, reflect, configure LLM — all via standardized protocol
+- **Autonomous Loop** — Salience-driven agent autonomy. No cron. No .md files. Adaptive heartbeat detects imperatives, allocates tasks by emotional proximity, agents self-organize. See [Autonomous Loop](docs/AUTONOMOUS-LOOP.md)
+- **Agent-Agnostic** — Works with KolegaCode, OpenCode, Claude Code, OpenClaw, or any LLM. One env var per agent.
 - **Identity Modes** — Personal, shared, or hybrid memory across multiple agents
 - **Dashboard** — Web UI for stats, memory scope, and system health
 - **Portable Data** — Single `DATA_DIR` env var controls where all data lives
@@ -462,11 +464,15 @@ ingress with path routing, HPA, and PDB. See [Deployment Guide](docs/DEPLOYMENT.
 - [Quick Start Guide](docs/QUICKSTART.md) — 5-minute setup
 - [Architecture](docs/ARCHITECTURE.md) — How it works under the hood
 - [MCP Tools Reference](docs/MCP-TOOLS.md) — All 35 tools with examples
+- [Autonomous Loop](docs/AUTONOMOUS-LOOP.md) — Salience-driven agent autonomy — installation, architecture, verification
 - [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md) — Reflective memory distillation — principles, architecture, and usage
+- [Security Policy](docs/SECURITY.md) — Security architecture, audit findings, vulnerability reporting
+- [OpenClaw Integration](docs/OPENCLAW-INTEGRATION.md) — Multi-agent shared memory setup with lessons learned
 - [REST API Reference](docs/API-REFERENCE.md) — HTTP endpoints
 - [Configuration Guide](docs/CONFIGURATION.md) — All environment variables
 - [Deployment Guide](docs/DEPLOYMENT.md) — Docker, cloud, K8s
 - [Migration Guide](docs/MIGRATION.md) — Migrate from cognitive-memory-chat
+- [Data Processing Pipelines](docs/Data-Processing-Pipelines.md) — Full memory pipeline architecture
 - [Multi-Platform Setup](SKILL.md) — Platform-specific agent configuration
 
 ## License
