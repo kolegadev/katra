@@ -236,12 +236,13 @@ export class MemoryManager {
         content_hash: contentHash,
         updated_at: new Date(),
       };
+      delete (factDocument as any).created_at;  // Moved to $setOnInsert to avoid conflict
 
       const result = await db.collection('semantic_facts').findOneAndUpdate(
         { content_hash: contentHash },
         {
           $set: factDocument,
-          $setOnInsert: { created_at: new Date() },
+          $setOnInsert: { created_at: fact.created_at || new Date() },
           $inc: { extraction_count: 1 },
         },
         { upsert: true, returnDocument: 'after' }
