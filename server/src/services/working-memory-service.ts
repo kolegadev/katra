@@ -183,7 +183,7 @@ export class WorkingMemoryService {
     /**
      * Retrieve item from working memory with performance optimization
      */
-    async retrieve(item_id: string, update_access_count: boolean = true): Promise<WorkingMemoryItem | null> {
+    async retrieve(item_id: string, update_access_count: boolean = true, tenant_id?: string): Promise<WorkingMemoryItem | null> {
         const start_time = performance.now();
         
         try {
@@ -195,6 +195,11 @@ export class WorkingMemoryService {
                 
                 if (result) {
                     const memory_item = JSON.parse(result) as WorkingMemoryItem;
+                    
+                    // Tenant scope check — reject if tenant_id provided and doesn't match
+                    if (tenant_id && memory_item.tenant_id && memory_item.tenant_id !== tenant_id) {
+                        return null;
+                    }
                     
                     // Update access metadata if requested
                     if (update_access_count) {
@@ -218,11 +223,13 @@ export class WorkingMemoryService {
         // Fallback to MongoDB
         this.cache_misses++;
         const db = get_database();
-        const memory_item = await db.collection('working_memory').findOne({ id: item_id });
+        const mongoFilter: any = { id: item_id };
+        if (tenant_id) mongoFilter.tenant_id = tenant_id;
+        const memory_item = await db.collection('working_memory').findOne(mongoFilter);
         
         if (memory_item && update_access_count) {
             await db.collection('working_memory').updateOne(
-                { id: item_id },
+                mongoFilter,
                 { 
                     $inc: { 'metadata.access_count': 1 },
                     $set: { 'metadata.last_accessed': new Date() }
@@ -443,7 +450,7 @@ export class WorkingMemoryService {
     /**
      * Delete memory item from all storage
      */
-    async delete(item_id: string): Promise<boolean> {
+    async delete(item_id: string, tenant_id?: string): Promise<boolean> {
         const start_time = performance.now();
         let deleted = false;
         
@@ -460,9 +467,11 @@ export class WorkingMemoryService {
             console.error('❌ Redis delete failed:', error);
         }
         
-        // Delete from MongoDB
+        // Delete from MongoDB — scoped by tenant_id when provided
         const db = get_database();
-        const result = await db.collection('working_memory').deleteOne({ id: item_id });
+        const mongoFilter: any = { id: item_id };
+        if (tenant_id) mongoFilter.tenant_id = tenant_id;
+        const result = await db.collection('working_memory').deleteOne(mongoFilter);
         if (result.deletedCount > 0) deleted = true;
         
         this.track_response_time(start_time);

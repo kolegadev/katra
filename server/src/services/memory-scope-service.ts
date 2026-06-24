@@ -83,8 +83,9 @@ export async function buildScopeFilter(user_id?: string): Promise<Record<string,
       return { user_id: user_id || DEFAULT_USER_ID };
 
     case 'shared':
-      // Communal: filter by shared_id only
-      return scope.shared_id ? { shared_id: scope.shared_id } : {};
+      // Communal: filter by shared_id only. Fall back to default user
+      // scope if shared_id is not configured (prevents data leak).
+      return scope.shared_id ? { shared_id: scope.shared_id } : { user_id: DEFAULT_USER_ID };
 
     case 'hybrid': {
       // Personal first, then shared, then other visible users
@@ -94,12 +95,12 @@ export async function buildScopeFilter(user_id?: string): Promise<Record<string,
       if (scope.hybrid_visible_user_ids.length > 0) {
         orConditions.push({ user_id: { $in: scope.hybrid_visible_user_ids } });
       }
-      // If no conditions, return empty filter (match all)
-      return orConditions.length > 0 ? { $or: orConditions } : {};
+      // If no conditions, fall back to default user scope (never return all records)
+      return orConditions.length > 0 ? { $or: orConditions } : { user_id: user_id || DEFAULT_USER_ID };
     }
 
     default:
-      return user_id ? { user_id } : {};
+      return { user_id: user_id || DEFAULT_USER_ID };
   }
 }
 

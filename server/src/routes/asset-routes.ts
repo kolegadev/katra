@@ -10,6 +10,8 @@ import { s3_asset_service } from '../services/s3-asset-service.js';
 import { get_database } from '../database/connection.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateContentHash } from '../services/content-hash-utils.js';
+import { validateKatraKey } from '../utils/api-key-manager.js';
+import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
 
 /**
  * Create asset management routes
@@ -17,13 +19,25 @@ import { generateContentHash } from '../services/content-hash-utils.js';
 export function create_assets_routes(): Hono {
     const router = new Hono();
 
+    // Auth middleware — require valid API key
+    router.use('*', async (c, next) => {
+        const result = await validateKatraKey(
+            c.req.header('Authorization') ?? '',
+            c.req.query('token') ?? undefined
+        );
+        if (!result.valid) {
+            return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
+        }
+        return next();
+    });
+
     /**
      * POST /upload-url - Get signed URL for direct browser upload
      */
     router.post('/upload-url', async (c) => {
         try {
             const body = await c.req.json();
-            const { filename, content_type, user_id, session_id, tags, lifecycle_days } = body;
+            const { filename, content_type, session_id, tags, lifecycle_days } = body;
             
             if (!filename || !content_type) {
                 return c.json({
@@ -36,7 +50,7 @@ export function create_assets_routes(): Hono {
                 filename,
                 content_type,
                 {
-                    user_id,
+                    user_id: DEFAULT_USER_ID,
                     session_id,
                     tags,
                     lifecycle_days

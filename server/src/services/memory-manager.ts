@@ -121,31 +121,37 @@ export class MemoryManager {
     return result.insertedId.toString();
   }
 
-  async get_event_by_id(event_id: string): Promise<EpisodicEvent | null> {
+  async get_event_by_id(event_id: string, user_id?: string): Promise<EpisodicEvent | null> {
     const db = get_database();
+    const filter: any = { id: event_id };
+    if (user_id) filter.user_id = user_id;
     const event = await db.collection('episodic_events')
-      .findOne({ id: event_id });
+      .findOne(filter);
     return event as any as EpisodicEvent | null;
   }
 
-  async get_events_by_session(session_id: string, limit: number = 50): Promise<EpisodicEvent[]> {
+  async get_events_by_session(session_id: string, limit: number = 50, user_id?: string): Promise<EpisodicEvent[]> {
     const db = get_database();
+    const filter: any = { session_id };
+    if (user_id) filter.user_id = user_id;
     const events = await db.collection('episodic_events')
-      .find({ session_id })
+      .find(filter)
       .sort({ timestamp: -1 })
       .limit(limit)
       .toArray();
     return events as any as EpisodicEvent[];
   }
 
-  async get_session_events(session_id: string, limit: number = 50): Promise<EpisodicEvent[]> {
-    return this.get_events_by_session(session_id, limit);
+  async get_session_events(session_id: string, limit: number = 50, user_id?: string): Promise<EpisodicEvent[]> {
+    return this.get_events_by_session(session_id, limit, user_id);
   }
 
-  async mark_event_processed(event_id: string, processing_metadata: any): Promise<void> {
+  async mark_event_processed(event_id: string, processing_metadata: any, user_id?: string): Promise<void> {
     const db = get_database();
+    const filter: any = { id: event_id };
+    if (user_id) filter.user_id = user_id;
     await db.collection('episodic_events').updateOne(
-      { id: event_id },
+      filter,
       {
         $set: {
           'metadata.processed': true,
@@ -214,9 +220,11 @@ export class MemoryManager {
   }
 
   // WORKING MEMORY METHODS
-  async get_session_state(session_id: string): Promise<WorkingMemorySession | null> {
+  async get_session_state(session_id: string, user_id?: string): Promise<WorkingMemorySession | null> {
     const db = get_database();
-    const result = await db.collection('working_memory_sessions').findOne({ session_id });
+    const filter: any = { session_id };
+    if (user_id) filter.user_id = user_id;
+    const result = await db.collection('working_memory_sessions').findOne(filter);
     return result as unknown as WorkingMemorySession | null;
   }
 
@@ -236,13 +244,12 @@ export class MemoryManager {
         content_hash: contentHash,
         updated_at: new Date(),
       };
-      delete (factDocument as any).created_at;  // Moved to $setOnInsert to avoid conflict
 
       const result = await db.collection('semantic_facts').findOneAndUpdate(
         { content_hash: contentHash },
         {
           $set: factDocument,
-          $setOnInsert: { created_at: fact.created_at || new Date() },
+          $setOnInsert: { created_at: new Date() },
           $inc: { extraction_count: 1 },
         },
         { upsert: true, returnDocument: 'after' }

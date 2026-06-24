@@ -248,9 +248,10 @@ export const create_recall_routes = (): Hono => {
 
       const { timeRange, eventTypes, template, maxTokens } = validation.data;
 
-      // Build session-focused context
+      // Build session-focused context — include userId for scoping
       const context = {
         sessionId,
+        userId: queryParams.userId || DEFAULT_USER_ID,
         timeRange,
         eventTypes
       };
@@ -320,9 +321,10 @@ export const create_recall_routes = (): Hono => {
 
       const { maxDepth, relationshipTypes, template, includeMetadata } = validation.data;
 
-      // Build entity-focused context
+      // Build entity-focused context — include userId for scoping
       const context = {
         entityId: nodeId,
+        userId: queryParams.userId || DEFAULT_USER_ID,
         maxDepth,
         relationshipTypes,
         entityType: 'any' // Could be enhanced to detect entity type

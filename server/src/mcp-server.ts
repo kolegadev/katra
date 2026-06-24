@@ -914,8 +914,9 @@ async function handleGetHistory(args: unknown): Promise<TextContent[]> {
   }
 
   const db = get_database();
+  const scopeFilter = await buildScopeFilter(resolveUserId((args as any).user_id));
   const events = await db.collection('episodic_events')
-    .find({ session_id: input.session_id })
+    .find({ ...scopeFilter, session_id: input.session_id })
     .sort({ timestamp: 1 })
     .limit(input.limit)
     .toArray();
@@ -1434,7 +1435,7 @@ async function handleExploreGraph(args: unknown): Promise<TextContent[]> {
   if (!is_database_connected()) return [{ type: 'text', text: '⚠️ MongoDB disconnected.' }];
   const db = get_database();
 
-  const scopeFilter = await buildScopeFilter();
+  const scopeFilter = await buildScopeFilter(resolveUserId((args as any).user_id));
   const nodeFilter: Record<string, unknown> = { ...scopeFilter };
   if (input.query) {
     try {
@@ -2289,6 +2290,13 @@ async function startHTTPServer(): Promise<void> {
 // ── Stdio Mode ─────────────────────────────────────────────────────
 
 async function startStdioServer(): Promise<void> {
+  // Require MCP auth to be configured even in stdio mode.
+  // Stdio is local-only but should still gate access behind an API key
+  // to prevent unauthorized local processes from reading/writing memory.
+  if (!isMcpAuthConfigured()) {
+    console.error('❌ MCP_API_KEY not configured. Set MCP_API_KEY in .env to enable the MCP server.');
+    process.exit(1);
+  }
   const server = createMCPServer();
   registerHandlers(server);
   const transport = new StdioServerTransport();

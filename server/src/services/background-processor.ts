@@ -106,7 +106,7 @@ export class BackgroundProcessor {
           await this.processEvent(event);
           processedCount++;
         } catch (error) {
-          console.error(`❌ Failed to process event ${event.id}:`, error);
+          console.error(`Failed to process event ${event.id}:`, (error as Error).message);
           await this.memoryManager.mark_event_processing_failed(
             event.id || (event as any)._id?.toString(),
             error instanceof Error ? error.message : 'Unknown error'
@@ -322,15 +322,22 @@ export class BackgroundProcessor {
       }
     });
 
-    // Update processing log to completed status
+    // Update processing log to completed status — store summary only (not raw data)
     if (idempotencyKey) {
       await this.updateProcessingLogEntry(idempotencyKey, 'completed', {
         processed_at: new Date(),
-        extraction_result: extractionResult,
-        dispatch_result: dispatchResult
+        extraction_summary: {
+          entity_count: extractionResult?.entities?.length || 0,
+          relationship_count: extractionResult?.relationships?.length || 0,
+          event_count: extractionResult?.events?.length || 0,
+          fact_count: extractionResult?.semantic_facts?.length || 0,
+        },
+        dispatch_summary: {
+          operations_completed: dispatchResult.operations_completed,
+          operations_failed: dispatchResult.operations_failed
+        }
       });
     }
-
     } finally {
       // Always release the processing lock
       await lockManager.releaseLock(lockKey);
@@ -588,7 +595,7 @@ export class BackgroundProcessor {
         session_id: sessionId,
         status: 'processing',
         started_at: new Date(),
-        processor_id: process.env.HOSTNAME || `${process.pid}`
+        processor_id: `proc-${process.pid}`
       });
     } catch (error) {
       // Don't fail processing if we can't create log entry, just warn

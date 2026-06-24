@@ -302,11 +302,17 @@ export class EmbeddingService {
       const db = get_database();
 
       // Build filter: user + has embedding + optional keyword pre-filter
-      const baseFilter: any = {
-        user_id: userId,
-        embedding: { $exists: true },
-        ...keywordFilter,
-      };
+      // Use $and to prevent keywordFilter from overriding user_id scoping
+      const filterConditions: any[] = [
+        { user_id: userId },
+        { embedding: { $exists: true } },
+      ];
+      if (Object.keys(keywordFilter).length > 0) {
+        filterConditions.push(keywordFilter);
+      }
+      const baseFilter: any = filterConditions.length > 1
+        ? { $and: filterConditions }
+        : filterConditions[0];
 
       // Optional time window
       if (maxAgeDays < 365) {

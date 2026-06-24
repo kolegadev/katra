@@ -5,18 +5,31 @@
 import { Hono } from 'hono';
 import { ReflectionStore } from '../services/reflection-store.js';
 import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
+import { validateKatraKey } from '../utils/api-key-manager.js';
+import { DEFAULT_USER_ID } from '../services/memory-scope-service.js';
 
 export const create_reflection_routes = (): Hono => {
   const router = new Hono();
   const store = ReflectionStore.get_instance();
 
+  // Auth middleware — require valid API key
+  router.use('*', async (c, next) => {
+    const result = await validateKatraKey(
+      c.req.header('Authorization') ?? '',
+      c.req.query('token') ?? undefined
+    );
+    if (!result.valid) {
+      return c.json({ error: 'Unauthorized', message: 'API key required' }, 401);
+    }
+    return next();
+  });
+
   /**
    * GET /api/v1/reflection/journal
-   * Get reflective journal entries. Query: period_type, limit, user_id
    */
   router.get('/journal', async (c) => {
     try {
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const periodType = c.req.query('period_type');
       const limit = parseInt(c.req.query('limit') || '10');
       const from = c.req.query('from') ? new Date(c.req.query('from')!) : undefined;
@@ -35,7 +48,7 @@ export const create_reflection_routes = (): Hono => {
    */
   router.get('/journal/latest', async (c) => {
     try {
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const periodType = c.req.query('period_type') || 'daily';
       const journal = await store.getLatestJournal(userId, periodType);
       return c.json({ success: true, journal });
@@ -51,7 +64,7 @@ export const create_reflection_routes = (): Hono => {
   router.get('/emotional-context/:entity', async (c) => {
     try {
       const entityName = c.req.param('entity');
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const context = await store.getEmotionalContext(userId, entityName);
       return c.json({ success: true, ...context });
     } catch (error: any) {
@@ -65,7 +78,7 @@ export const create_reflection_routes = (): Hono => {
    */
   router.get('/insights', async (c) => {
     try {
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const domain = c.req.query('domain');
       const status = c.req.query('status');
       const limit = parseInt(c.req.query('limit') || '10');
@@ -83,7 +96,7 @@ export const create_reflection_routes = (): Hono => {
    */
   router.get('/unresolved', async (c) => {
     try {
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const threads = await store.getUnresolvedThreads(userId);
       return c.json({ success: true, count: threads.length, threads });
     } catch (error: any) {
@@ -98,7 +111,7 @@ export const create_reflection_routes = (): Hono => {
   router.get('/arc/:entity', async (c) => {
     try {
       const entityName = c.req.param('entity');
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const limit = parseInt(c.req.query('limit') || '10');
 
       const arc = await store.getReflectionArc(userId, entityName, limit);
@@ -114,7 +127,7 @@ export const create_reflection_routes = (): Hono => {
    */
   router.get('/nodes', async (c) => {
     try {
-      const userId = c.req.query('user_id') || 'default';
+      const userId = DEFAULT_USER_ID;
       const nodes = await store.getAllReflectionNodes(userId);
       return c.json({ success: true, count: nodes.length, nodes });
     } catch (error: any) {

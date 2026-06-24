@@ -72,7 +72,7 @@ class RedisLockManager {
   private processorId: string;
 
   constructor() {
-    this.processorId = process.env.HOSTNAME || `${process.pid}`;
+    this.processorId = `proc-${process.pid}`;
   }
 
   /**
@@ -451,12 +451,12 @@ export class EpisodicEventManager {
           'metadata.processing_error': error,
           'metadata.processing_failed_at': new Date(),
           'metadata.updated_at': new Date(),
-          'metadata.retry_count': { $inc: 1 }
-        }
+        },
+        $inc: { 'metadata.retry_count': 1 }
       }
     );
 
-    console.log(`❌ Marked event ${eventId} processing as failed: ${error}`);
+    console.log(`Marked event ${eventId} processing as failed: ${error.substring(0, 200)}`);
   }
 
   /**
