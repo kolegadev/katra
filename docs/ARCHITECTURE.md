@@ -34,11 +34,11 @@ These services form the irreducible memory system:
 | `background-processor.ts` | Async pipeline: episodic → semantic extraction → knowledge graph | All above |
 | `openclaw-ingestion-service.ts` | Session log ingestion (rename to generic `session-ingestion`) | Episodic event manager |
 
-#### MCP Server (EXTRACT)
+#### MCP Server
 
-`mcp-server.ts` — the 29-tool MCP server. This is the primary client interface.
+`mcp-server.ts` — the 35-tool MCP server. This is the primary client interface.
 
-#### Database Layer (EXTRACT)
+#### Database Layer
 
 | File | Purpose |
 |---|---|
@@ -47,15 +47,15 @@ These services form the irreducible memory system:
 | `migrations.ts` | Index creation runner |
 | `index-management.ts` | All MongoDB index definitions |
 
-#### Types (EXTRACT)
+#### Types
 
 `types/memory.ts` — all interfaces (EpisodicEvent, SemanticFact, KnowledgeNode, etc.)
 
-#### LLM Service (EXTRACT — make pluggable)
+#### LLM Service (pluggable)
 
 `llm-service.ts` — currently hardcoded to DeepSeek. Must be abstracted to support any OpenAI-compatible provider.
 
-#### REST API Routes (EXTRACT subset)
+#### REST API Routes 
 
 | Route file | Keep? | Why |
 |---|---|---|
@@ -69,7 +69,7 @@ These services form the irreducible memory system:
 
 
 
-#### Frontend (REBUILD — minimal dashboard only)
+#### Frontend (minimal dashboard only- aplha)
 
 The current frontend is a full chat interface. Katra needs only a lightweight admin dashboard showing:
 - Memory stats (events, facts, graph nodes)
