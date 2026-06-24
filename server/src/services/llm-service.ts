@@ -1,3 +1,4 @@
+import net from 'node:net';
 import OpenAI from 'openai';
 import { CAPABILITY_CARD } from './capability-card.js';
 
@@ -27,6 +28,70 @@ const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string }> = {
 async function get_db() {
   const { get_database } = await import('../database/connection.js');
   return get_database();
+}
+
+/** Plain-HTTP is tolerated only for these trusted Docker-internal hostnames (Ollama). */
+const HTTP_ALLOWED_HOSTS = new Set<string>(['host.docker.internal']);
+
+/** Returns true if the IP literal falls in a private/loopback/link-local range. */
+function isPrivateIp(ip: string): boolean {
+  switch (net.isIP(ip)) {
+    case 4: {
+      const o = ip.split('.').map(Number);
+      return (
+        o[0] === 0 ||
+        o[0] === 10 ||
+        o[0] === 127 ||
+        (o[0] === 169 && o[1] === 254) ||
+        (o[0] === 172 && o[1] >= 16 && o[1] <= 31) ||
+        (o[0] === 192 && o[1] === 168)
+      );
+    }
+    case 6: {
+      const v6 = ip.toLowerCase();
+      if (v6 === '::1' || v6 === '::') return true;
+      if (/^f[cd]/.test(v6)) return true;
+      if (/^fe[89ab]/.test(v6)) return true;
+      const mapped = v6.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+      if (mapped) return isPrivateIp(mapped[1]);
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
+/**
+ * Validates a user-supplied base_url against SSRF.
+ * Allows HTTPS for any public host, and HTTP only for trusted Docker-internal hosts.
+ * Throws with a descriptive message on rejection.
+ */
+export function validateBaseUrl(rawUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid base_url: ${JSON.stringify(rawUrl)}`);
+  }
+
+  // URL keeps brackets on IPv6 literals (e.g. "[::1]"); strip them for checks.
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+
+  const isHttps = url.protocol === 'https:';
+  const isAllowedHttp = url.protocol === 'http:' && HTTP_ALLOWED_HOSTS.has(host);
+  if (!isHttps && !isAllowedHttp) {
+    throw new Error(`base_url must use https (got "${url.protocol}")`);
+  }
+
+  if (host === 'localhost' || host.endsWith('.localhost') || host === 'metadata.google.internal') {
+    throw new Error(`base_url host not allowed: ${host}`);
+  }
+
+  // WHATWG URL normalises IPv4 to dotted-decimal, so encoding bypasses (decimal,
+  // octal, hex, short-form) are already neutralised before we reach this check.
+  if (net.isIP(host) !== 0 && isPrivateIp(host)) {
+    throw new Error(`base_url points to a private or reserved address: ${host}`);
+  }
 }
 
 /**
@@ -138,7 +203,12 @@ export class LLMService {
     const config = await get_llm_config_from_db();
     if (!config || !config.api_key) return false;
 
-    return this.apply_config(config);
+    try {
+      return this.apply_config(config);
+    } catch (err: any) {
+      console.error(`❌ Stored LLM config rejected (SSRF validation): ${err?.message}. Falling back.`);
+      return false;
+    }
   }
 
   /**
@@ -157,6 +227,8 @@ export class LLMService {
       console.warn(`⚠️ Cannot apply LLM config: missing base_url or model for provider "${config.provider}"`);
       return false;
     }
+
+    validateBaseUrl(baseUrl);
 
     try {
       const client = new OpenAI({
