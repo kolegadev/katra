@@ -14,10 +14,14 @@ Together with the heartbeat, this creates the full autonomous loop:
 No cron. No .md file. No human prompt.
 """
 
-import json, os, time, argparse
+import json, os, time, argparse, sys
 from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 from urllib.error import URLError
+
+# Import authority matrix for scoped autonomy
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from authority_matrix import gate_action, can_act_autonomously, get_action_instruction
 
 AGENT_ID = os.environ.get("KATRA_AGENT_ID", "kolega-agent")
 STATE_FILE = os.path.expanduser(f"~/.katra/agent-executor-{AGENT_ID}.json")
@@ -85,8 +89,21 @@ def http_get_json(url, headers=None):
         return {"error": str(e)}
 
 def execute_task(task):
-    """Execute the task assigned to this agent."""
+    """Execute the task assigned to this agent, gated by authority scope."""
     entity = task['entity']
+    
+    # ── AUTHORITY GATE ──
+    authority = gate_action(entity)
+    print(f"  🔐 Scope: {authority['scope']} ({authority['autonomy']})")
+    
+    if not authority['can_execute']:
+        # GATED or CAUTIOUS — report only, don't modify
+        result = {"status": "gated", "output": f"[{authority['scope']}] {authority['instruction']}"}
+        print(f"  🛑 GATED: {authority['instruction'][:100]}")
+        return result
+    
+    # SCOPE A — fully autonomous
+    print(f"  ✅ AUTONOMOUS — executing immediately")
     
     if "gh-hygiene" in entity.lower():
         repo = http_get_json("https://api.github.com/repos/kolegadev/gh-hygiene")
