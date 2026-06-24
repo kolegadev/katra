@@ -228,6 +228,43 @@ Three modes, auto-detected from config:
 
 ---
 
+## Security Architecture
+
+Katra implements defense-in-depth across four layers:
+
+### Layer 1: Authentication
+
+- API keys hashed with SHA-256, stored in `system_settings`. Plaintext never touches MongoDB.
+- Constant-time comparison (`timingSafeEqual`) prevents timing side-channel attacks.
+- Dual-key system: `MCP_API_KEY` for agent operations, `KATRA_API_KEY` for admin operations.
+- Stdio transport requires `MCP_API_KEY` to be configured — refuses to start without it.
+- Keys auto-generated with 256-bit entropy if not provided. Hashes persisted for reuse.
+
+### Layer 2: Authorization
+
+- Every route file has `validateKatraKey` middleware. No unauthenticated data access.
+- User identity bound server-side (`DEFAULT_USER_ID`) — never accepted from client body/query.
+- Admin tools (`set_memory_scope`, `configure_llm`) gated behind `KATRA_API_KEY`.
+- Memory scope service (`buildScopeFilter`) never returns `{}` — prevents cross-user data leaks.
+
+### Layer 3: Input Validation
+
+| Protection | Mechanism |
+|-----------|-----------|
+| Prototype pollution | `__proto__`, `constructor`, `prototype` rejected in working memory |
+| Body size limits | 10MB for MCP requests, 5MB per working memory item |
+| Metadata injection | Caller metadata stripped of internal fields |
+| SSRF prevention | LLM base URL validated: blocks localhost, metadata service, private IPs |
+| Rate limiting | Sliding window, Redis-backed. Ingestion: 120 req/min. Admin: per-endpoint. |
+
+### Layer 4: Data Protection
+
+- Audit logs store extraction counts only, not raw extracted data.
+- Error messages sanitized — no stack traces, hostnames, or PII exposed.
+- Processor IDs anonymized (`proc-{pid}` instead of hostname).
+- LLM API keys accessible only through admin-authenticated endpoints.
+- Embedding queries use `$and` to prevent `keywordFilter` from overriding user scoping.
+
 ## Three Deployment Tiers
 
 ### Tier 1: Local Docker (Self-Hosted, Single Machine)

@@ -133,9 +133,26 @@ Add Katra to your agent's MCP config:
 }
 ```
 
-Restart your agent. It now has 29 memory tools available.
+Restart your agent. It now has 35 memory tools available.
 
-## 6. Configure the LLM Provider
+## 7. Run the Test Suite
+
+Katra includes a comprehensive test suite (87 tests, 9 files, 0 failures):
+
+```bash
+cd server
+npm install
+npm test                    # All unit + security tests (< 1s)
+npm run test:unit           # Unit tests only (54 tests)
+npm run test:security       # Security regression tests (18 tests)
+npm run test:integration    # Integration tests (Docker stack required, 15 tests)
+npm run test:coverage       # With coverage report
+./tests/run-all.sh all      # Shell runner — same as npm test
+```
+
+Tests cover: API key hashing, memory scope filtering, prototype pollution prevention, user ID scoping, metadata sanitization, retry counter logic, route authentication, admin gating, and input validation.
+
+## 8. Configure the LLM Provider
 
 Katra needs an LLM provider for semantic extraction, auto-journaling, and summaries.
 Configure it via MCP tool, dashboard, or env vars.
@@ -160,7 +177,7 @@ then `docker-compose restart server`
 > Configuring via MCP tool or dashboard stores the config in MongoDB and applies
 > live — no restart needed. Env vars are a fallback, read on startup only.
 
-## 7. Configure Identity Mode (Optional)
+## 9. Configure Memory Scope (Optional)
 
 By default, each agent's memories are isolated (personal mode). To enable shared
 or hybrid memory across multiple agents:
@@ -178,7 +195,7 @@ curl -X PUT http://localhost:9012/api/v1/admin/memory-scope \
   }'
 ```
 
-## 8. Deploy the Watcher (Optional)
+## 10. Deploy the Watcher (Optional)
 
 For passive background collection from conversation logs, use the watchers
 included in this repo under `watcher/`:
@@ -219,8 +236,11 @@ On macOS, use `launchctl` / `~/Library/LaunchAgents` instead of systemd (see
 
 ## Next Steps
 
-- [MCP Tools Reference](MCP-TOOLS.md) — All 29 tools with examples
+- [MCP Tools Reference](MCP-TOOLS.md) — All 35 tools with examples
 - [REST API Reference](API-REFERENCE.md) — HTTP endpoints
+- [Security Policy](SECURITY.md) — Security architecture and vulnerability reporting
 - [Configuration Guide](CONFIGURATION.md) — All environment variables
-- [Deployment Guide](DEPLOYMENT.md) — Cloud, K8s, USB storage
+- [Deployment Guide](DEPLOYMENT.md) — Cloud, K8s, Raspberry Pi
+- [Sleep Consolidation](SLEEP-CONSOLIDATION.md) — Reflective memory distillation
+- [Data Processing Pipelines](Data-Processing-Pipelines.md) — Full pipeline architecture
 - [SKILL.md](../SKILL.md) — Platform-specific agent setup

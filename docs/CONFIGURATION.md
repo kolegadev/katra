@@ -4,27 +4,29 @@
 
 All configuration is via environment variables (or `.env` file). See `.env.example` for the template.
 
-### Core
+## Security Configuration
+
+Katra stores API keys as SHA-256 hashes in MongoDB. Plaintext keys exist only in `.env` or the one-time console output at generation time.
 
 | Variable | Default | Description |
 |---|---|---|
-| `KATRA_API_KEY` | (auto-generated) | API key for REST API authentication |
-| `MCP_API_KEY` | (auto-generated) | Dedicated MCP auth key (your agent sends this) |
-| `HOST_MCP_PORT` | `3112` | **Host port** mapped to the MCP server (point your agent here) |
-| `HOST_API_PORT` | `9012` | **Host port** mapped to the REST API + dashboard |
-| `PORT` | `9002` | REST API port **inside the container** |
-| `MCP_PORT` / `MCP_PORT_INTERNAL` | `3100` | MCP server port **inside the container** |
+| `KATRA_API_KEY` | (auto-generated) | Admin API key — required for admin operations (`set_memory_scope`, `configure_llm`, tenant management) |
+| `MCP_API_KEY` | (auto-generated) | MCP agent key — your agent sends this for memory operations |
+| `ADMIN_API_KEY` | — | Legacy alias for `KATRA_API_KEY` |
+
+**Key storage**: Only SHA-256 hashes are persisted to MongoDB `system_settings`. Validation hashes the incoming token and compares against the stored digest using constant-time comparison — the database never holds a value that grants API access directly.
+
+**Key auto-generation**: If both keys are unset, Katra generates 256-bit random keys on first boot, prints them to `docker logs`, and persists the hashes. Subsequent restarts reuse the stored hashes.
+
+### Core Ports
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST_MCP_PORT` | `3112` | MCP port on host (point your agent here) |
+| `HOST_API_PORT` | `9012` | REST API port on host |
+| `PORT` | `9002` | REST API port inside container |
+| `MCP_PORT` / `MCP_PORT_INTERNAL` | `3100` | MCP port inside container |
 | `HOST` | `0.0.0.0` | Bind address |
-
-**Port mapping:** `docker-compose.yml` maps `HOST_MCP_PORT:3112 → container:3100` and
-`HOST_API_PORT:9012 → container:9002`. Configure your agent with the **host ports**
-(`3112`/`9012`), not the internal container ports.
-
-**API key auto-generation:** If `MCP_API_KEY` and `KATRA_API_KEY` are not set in `.env`,
-Katra generates cryptographically random keys on first startup, persists them in the
-`system_settings` collection in MongoDB, and prints them to the server logs. Generated
-keys are reused on subsequent restarts. Set explicit values in `.env` to disable
-auto-generation (recommended for production).
 
 ### MongoDB
 

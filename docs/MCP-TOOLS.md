@@ -1,14 +1,25 @@
 # MCP Tools Reference
 
-Katra exposes **29 tools** via the Model Context Protocol (MCP). All tools are accessible through the MCP endpoint at `http://localhost:3112/mcp` (the host-mapped port; inside the container this is `3100`).
+Katra exposes **35 tools** via the Model Context Protocol (MCP). All tools are accessible through the MCP endpoint at `http://localhost:3112/mcp`.
 
 ## Authentication
 
 All MCP requests require:
 ```
-Authorization: Bearer <your-mcp-api-key>
+X-MCP-Auth: <your-mcp-api-key>
 Accept: application/json, text/event-stream
 ```
+
+API keys are SHA-256 hashed with timing-safe comparison. Keys can also be passed via:
+- `Authorization: Bearer <key>` (REST-style, also supported)
+- `?token=<key>` query parameter (URL-based, also supported)
+
+## Security
+
+- **Stdio transport**: Requires `MCP_API_KEY` to be configured (refuses to start without it)
+- **Admin tools**: `set_memory_scope`, `configure_llm` require `KATRA_API_KEY` (admin), not just `MCP_API_KEY`
+- **User scoping**: All memory operations are scoped to the authenticated user — cross-user data access is prevented at the database query level
+- **Input validation**: Working memory rejects prototype pollution keys. Request body capped at 10MB.
 
 ## JSON-RPC Call Pattern
 
@@ -312,6 +323,66 @@ Configure the LLM provider for semantic extraction, auto-journaling, and summari
 ```json
 {"name":"configure_llm","arguments":{"provider":"deepseek","api_key":"sk-...","base_url":"https://api.deepseek.com/v1","model":"deepseek-v4-flash"}}
 ```
+
+---
+
+## Sleep Consolidation / Reflection
+
+### trigger_reflection
+
+Manually trigger a sleep consolidation run for a specific time period. The system gathers all memory data from the period and distills it into emotional understanding, philosophical insights, and reflective narrative.
+
+| Parameter | Type | Required |
+|---|---|---|
+| period_type | enum: `daily`, `weekly`, `monthly` | Yes |
+| user_id | string | No |
+
+### get_daily_reflection
+
+Get the most recent reflective journal entry from sleep consolidation.
+
+| Parameter | Type | Required |
+|---|---|---|
+| period_type | enum: `daily`, `weekly`, `monthly` | No (default: `daily`) |
+| user_id | string | No |
+
+### get_emotional_context
+
+How the system "feels" about a specific entity — emotional signature and all emotional edges.
+
+| Parameter | Type | Required |
+|---|---|---|
+| entity_name | string | Yes |
+| user_id | string | No |
+
+### get_philosophical_insights
+
+Query philosophical insights that have emerged across reflection periods.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| domain | string | No | — |
+| status | enum: `emerging`, `strengthening`, `stable`, `challenged` | No | — |
+| limit | number | No | 10 |
+| user_id | string | No | — |
+
+### get_reflection_arc
+
+Trace the emotional trajectory for an entity over time.
+
+| Parameter | Type | Required |
+|---|---|---|
+| entity_name | string | Yes |
+| user_id | string | No |
+| limit | number | No (default: 10) |
+
+### get_unresolved_threads
+
+Get unresolved questions and tensions that persist across reflection periods.
+
+| Parameter | Type | Required |
+|---|---|---|
+| user_id | string | No |
 
 ---
 

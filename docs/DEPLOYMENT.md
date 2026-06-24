@@ -236,3 +236,17 @@ curl -H "Authorization: Bearer YOUR_KEY" http://localhost:9012/api/v1/health
 # Full diagnostics
 curl -H "Authorization: Bearer YOUR_KEY" http://localhost:9012/api/v1/admin/diagnostics
 ```
+
+## Running the Test Suite
+
+Katra includes 87 tests across 9 files (unit, security, and integration):
+
+```bash
+cd server
+npm install
+npm test                    # All unit + security tests (< 1s, no Docker needed)
+npm run test:integration    # Integration tests (Docker stack required)
+npm run test:coverage       # With coverage report
+```
+
+See [SECURITY.md](SECURITY.md) for the security regression test suite.
