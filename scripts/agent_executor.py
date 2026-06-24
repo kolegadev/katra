@@ -184,6 +184,27 @@ var r = db.agent_journal_auto.insertOne({{
 print("Bulletin posted: " + r.insertedId);
 ''')
 
+def _trigger_kolegacode(task, result):
+    """Wake up KolegaCode by sending a prompt to its terminal.
+    
+    This is the OpenClaw-style heartbeat trigger — programmatic, not human.
+    Writes to KolegaCode's controlling TTY to submit a prompt, which fires
+    UserPromptSubmit → bridge injects Katra context → KolegaCode processes."""
+    
+    import subprocess
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    trigger_script = os.path.join(script_dir, "trigger_kolegacode.sh")
+    
+    if not os.path.exists(trigger_script):
+        return
+    
+    prompt = f"Autonomous heartbeat executed: {task['entity']} — {result['output'][:200]}. Check shared memory for details."
+    
+    try:
+        subprocess.run(["bash", trigger_script, prompt], timeout=5, capture_output=True)
+    except:
+        pass  # Trigger is best-effort — don't fail the executor if KolegaCode is busy
+
 def _load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f: return json.load(f)
@@ -196,6 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description=f"Agent Task Executor — {AGENT_ID}")
     parser.add_argument("--once", action="store_true", help="Single check and exit")
     parser.add_argument("--interval", type=int, default=PULSE_INTERVAL)
+    parser.add_argument("--trigger", action="store_true", help="Also trigger KolegaCode terminal prompt")
     args = parser.parse_args()
     
     print("=" * 55)
@@ -224,6 +246,10 @@ def main():
             state["tasks_completed"] += 1
             _save_state(state)
             print(f"  📝 Result stored and bulletin posted to shared memory")
+            
+            # Trigger KolegaCode if enabled — sends the task summary to its terminal
+            if args.trigger:
+                _trigger_kolegacode(task, result)
         else:
             if cycle % 10 == 0:
                 print(f"  ⏳ No tasks assigned. {state['tasks_completed']} completed so far. ({cycle} checks)")
