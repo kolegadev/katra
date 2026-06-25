@@ -628,17 +628,37 @@ async function searchMemory() {
     const r = await fetch(`${API}/admin/memory-search?${params}`);
     const d = await r.json();
     const results = d?.results || [];
-    document.getElementById('mem-results').innerHTML = results.length > 0 ? results.map(e => {
+    window._memResults = results; // cache for expand/collapse
+
+    const tbody = document.getElementById('mem-results');
+    tbody.innerHTML = results.length > 0 ? results.map((e, i) => {
       const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '—';
       const col = e.collection || '—';
       const usr = e.user_id || '—';
       const msg = (e.content || '').substring(0, 200);
       const colBadge = col === 'episodic' ? 'blue' : col === 'semantic' ? 'green' : col === 'knowledge' ? 'purple' : col === 'reflections' ? 'amber' : 'blue';
-      return `<tr><td style="white-space:nowrap">${ts}</td><td><span class="badge badge-${colBadge}">${col}</span></td><td class="mono">${usr}</td><td class="mono">${msg}${msg.length >= 200 ? '…' : ''}</td></tr>`;
+      const safeContent = (e.content || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const fullContent = JSON.stringify(e, null, 2).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return `<tr class="mem-row" onclick="toggleMemRow(${i})" style="cursor:pointer" title="Click to expand">
+        <td style="white-space:nowrap">${ts}</td>
+        <td><span class="badge badge-${colBadge}">${col}</span></td>
+        <td class="mono">${usr}</td>
+        <td class="mono">${msg}${msg.length >= 200 ? '…' : ''}</td>
+      </tr>
+      <tr id="mem-detail-${i}" class="mem-detail" style="display:none"><td colspan="4" style="background:var(--bg2);padding:12px 16px">
+        <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:0.72rem;max-height:400px;overflow-y:auto;line-height:1.5">${fullContent}</pre>
+      </td></tr>`;
     }).join('') : '<tr><td colspan="4" style="color:var(--text3)">No results found</td></tr>';
   } catch(e) {
     document.getElementById('mem-results').innerHTML = `<tr><td colspan="4" style="color:var(--red)">Error: ${e.message}</td></tr>`;
   }
+}
+
+function toggleMemRow(i) {
+  const detail = document.getElementById('mem-detail-' + i);
+  if (!detail) return;
+  const isHidden = detail.style.display === 'none';
+  detail.style.display = isHidden ? 'table-row' : 'none';
 }
 
 // ═══════════ SETTINGS ═══════════
