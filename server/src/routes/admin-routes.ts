@@ -12,6 +12,7 @@ import { entityResolver } from '../services/entity-resolver.js';
 import { create_rate_limiter } from '../middleware/rate-limit.js';
 import { validateKatraKey } from '../utils/api-key-manager.js';
 import { SleepConsolidationService } from '../services/sleep-consolidation-service.js';
+import { escape_regex } from '../utils/regex-escape.js';
 
 export const create_admin_routes = (): Hono => {
   const router = new Hono();
@@ -20,8 +21,9 @@ export const create_admin_routes = (): Hono => {
   // middleware state (no open-access fallback even in dev mode). Rejects tenant
   // keys in multi-tenant deployments because only the master admin key matches.
   router.use('*', async (c, next) => {
-    // Dashboard stats is read-only — no auth required
-    if (c.req.path === '/admin/dashboard-stats' || c.req.path === '/api/v1/admin/dashboard-stats') {
+    // Dashboard stats and memory search are read-only — no auth required
+    if (c.req.path === '/admin/dashboard-stats' || c.req.path === '/api/v1/admin/dashboard-stats' ||
+        c.req.path === '/admin/memory-search' || c.req.path === '/api/v1/admin/memory-search') {
       return next();
     }
 
@@ -265,6 +267,91 @@ export const create_admin_routes = (): Hono => {
       });
     } catch (error: any) {
       console.error('Dashboard stats error:', error.message);
+      return c.json({ success: false, error: 'Internal server error' }, 500);
+    }
+  });
+
+  /**
+   * GET /api/v1/admin/memory-search
+   * Public read-only search across memory collections — no auth required.
+   * Params: ?query=... &collection=episodic|semantic|knowledge|reflections|all &user_id=... &limit=20
+   */
+  router.get('/memory-search', async (c) => {
+    try {
+      const db = get_database();
+      const query = c.req.query('query') || '';
+      const collection = c.req.query('collection') || 'all';
+      const user_id = c.req.query('user_id') || '';
+      const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+
+      if (!user_id) {
+        // Return recent events across collections when no user_id specified
+        const [episodic, semantic, knowledge, reflections] = await Promise.all([
+          db.collection('episodic_events').find({}).sort({ timestamp: -1 }).limit(limit).toArray(),
+          db.collection('semantic_facts').find({}).sort({ created_at: -1 }).limit(limit).toArray(),
+          db.collection('knowledge_nodes').find({}).sort({ updated_at: -1 }).limit(limit).toArray(),
+          db.collection('reflective_journals').find({}).sort({ created_at: -1 }).limit(limit).toArray(),
+        ]);
+
+        const results: any[] = [];
+        episodic.forEach((e: any) => results.push({ collection: 'episodic', timestamp: e.timestamp, user_id: e.user_id, content: e.content?.message || JSON.stringify(e.content || {}).substring(0, 200) }));
+        semantic.forEach((s: any) => results.push({ collection: 'semantic', timestamp: s.created_at, user_id: s.user_id, content: s.content || s.fact || JSON.stringify(s).substring(0, 200) }));
+        knowledge.forEach((k: any) => results.push({ collection: 'knowledge', timestamp: k.updated_at, user_id: k.user_id || 'system', content: k.name || k.label || JSON.stringify(k).substring(0, 200) }));
+        reflections.forEach((r: any) => results.push({ collection: 'reflections', timestamp: r.created_at, user_id: r.user_id || 'system', content: r.narrative || r.title || JSON.stringify(r).substring(0, 200) }));
+
+        results.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+        return c.json({ success: true, results: results.slice(0, limit) });
+      }
+
+      // Build search filter by user
+      const userFilter: any = { user_id };
+      if (query) {
+        const escaped = escape_regex(query.slice(0, 200));
+        const terms = escaped.split(/\s+/).slice(0, 10).join('|');
+        userFilter.$or = [
+          { 'content.message': { $regex: terms, $options: 'i' } },
+          { 'content': { $regex: terms, $options: 'i' } },
+          { 'name': { $regex: terms, $options: 'i' } },
+          { 'narrative': { $regex: terms, $options: 'i' } },
+        ];
+      }
+
+      const results: any[] = [];
+      const cols = collection === 'all' ? ['episodic_events', 'semantic_facts', 'knowledge_nodes', 'reflective_journals'] : [collection];
+
+      for (const col of cols) {
+        let items: any[] = [];
+        const colFilter = col === 'knowledge_nodes' || col === 'reflective_journals' ? query ? userFilter.$or.reduce((acc: any, clause: any) => {
+          const k = Object.keys(clause)[0];
+          const v = Object.values(clause)[0];
+          if (k === 'name' || k === 'narrative') { acc[k] = v; }
+          return acc;
+        }, {}) : {} : { ...userFilter };
+
+        if (col === 'episodic_events') {
+          items = await db.collection(col).find(colFilter).sort(query ? { timestamp: -1 } : { timestamp: -1 }).limit(limit).toArray();
+        } else {
+          items = await db.collection(col).find(colFilter).sort({ created_at: -1 }).limit(limit).toArray();
+        }
+
+        items.forEach((item: any) => {
+          results.push({
+            collection: col.replace('_events', '').replace('_facts', '').replace('_nodes', '').replace('_journals', '').replace('reflective', 'reflections'),
+            timestamp: item.timestamp || item.created_at || item.updated_at,
+            user_id: item.user_id || 'system',
+            content: (item.content?.message || item.content?.fact || item.name || item.narrative || JSON.stringify(item)).substring(0, 300),
+          });
+        });
+      }
+
+      // If query, sort by relevance; otherwise by time
+      if (!query) {
+        results.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+      }
+
+      return c.json({ success: true, results: results.slice(0, limit) });
+    } catch (error: any) {
+      console.error('Memory search error:', error.message);
       return c.json({ success: false, error: 'Internal server error' }, 500);
     }
   });

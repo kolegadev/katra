@@ -613,26 +613,29 @@ async function saveScope() {
 
 // ═══════════ MEMORY ═══════════
 async function searchMemory() {
-  const query = document.getElementById('mem-query').value;
+  const query = document.getElementById('mem-query').value.trim();
   const collection = document.getElementById('mem-collection').value;
-  const user = document.getElementById('mem-user').value;
+  const user = document.getElementById('mem-user').value.trim();
   const limit = document.getElementById('mem-limit').value || 20;
-  
-  // Use the episodic events endpoint for search
-  let path = `/memory/episodic/events?limit=${limit}`;
-  if (user) path += `&user_id=${user}`;
-  
+
+  const params = new URLSearchParams();
+  if (query) params.set('query', query);
+  params.set('collection', collection);
+  if (user) params.set('user_id', user);
+  params.set('limit', limit.toString());
+
   try {
-    const r = await fetch(`${API}${path}`, {headers: authHeaders()});
+    const r = await fetch(`${API}/admin/memory-search?${params}`);
     const d = await r.json();
-    const events = d?.events || d?.data || [];
-    document.getElementById('mem-results').innerHTML = events.map(e => {
+    const results = d?.results || [];
+    document.getElementById('mem-results').innerHTML = results.length > 0 ? results.map(e => {
       const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : '—';
-      const col = e.event_type || 'episodic';
+      const col = e.collection || '—';
       const usr = e.user_id || '—';
-      const msg = (e.content?.message || JSON.stringify(e.content || {})).substring(0, 150);
-      return `<tr><td style="white-space:nowrap">${ts}</td><td><span class="badge badge-blue">${col}</span></td><td class="mono">${usr}</td><td class="mono">${msg}${msg.length >= 150 ? '…' : ''}</td></tr>`;
-    }).join('') || '<tr><td colspan="4" style="color:var(--text3)">No results. Try a search or enter admin key.</td></tr>';
+      const msg = (e.content || '').substring(0, 200);
+      const colBadge = col === 'episodic' ? 'blue' : col === 'semantic' ? 'green' : col === 'knowledge' ? 'purple' : col === 'reflections' ? 'amber' : 'blue';
+      return `<tr><td style="white-space:nowrap">${ts}</td><td><span class="badge badge-${colBadge}">${col}</span></td><td class="mono">${usr}</td><td class="mono">${msg}${msg.length >= 200 ? '…' : ''}</td></tr>`;
+    }).join('') : '<tr><td colspan="4" style="color:var(--text3)">No results found</td></tr>';
   } catch(e) {
     document.getElementById('mem-results').innerHTML = `<tr><td colspan="4" style="color:var(--red)">Error: ${e.message}</td></tr>`;
   }
