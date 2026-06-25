@@ -238,8 +238,12 @@ export class MemoryManager {
       const userId = fact.user_id || 'unknown';
       const contentHash = stableContentHash(userId, fact.content);
 
+      // Strip created_at from the spread — it's handled by $setOnInsert below.
+      // Including it would conflict: $set sets created_at + $setOnInsert also
+      // sets created_at → MongoServerError "would create a conflict".
+      const { created_at: _ca, ...factFields } = fact as any;
       const factDocument = {
-        ...fact,
+        ...factFields,
         user_id: userId,
         content_hash: contentHash,
         updated_at: new Date(),

@@ -627,8 +627,6 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     confidence: input.confidence,
     source,
     timestamp: new Date(),
-    last_accessed: new Date(),
-    access_count: 0,
   };
   if (tags.length > 0) doc.tags = tags;
   if (sharedId) doc.shared_id = sharedId;
@@ -636,15 +634,15 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
   const result = await db.collection('semantic_facts').findOneAndUpdate(
     { content_hash: contentHash },
     {
-      $set: doc,
+      $set: { ...doc, last_accessed: new Date() },
       $setOnInsert: { created_at: new Date() },
-      $inc: { access_count: 0 },
+      $inc: { access_count: 1 },
     },
     { upsert: true, returnDocument: 'after' }
   );
 
   const insertedId = result?._id;
-  const wasUpdate = result?.last_accessed && result?.access_count;
+  const wasUpdate = result && (result as any).access_count > 1;
 
   // Fire-and-forget embedding
   try {
