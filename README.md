@@ -9,9 +9,15 @@ episodic recall, semantic search, knowledge graphs, and temporal analysis.
 Any MCP-compatible agent works: OpenClaw, Claude Code, OpenCode, Codex CLI, Kolega Code or
 anything that speaks the Model Context Protocol.
 
+## Cognitive Memory Thesis
+
+The mission of Katra is to create an analog of human memory architecture, with the hope that it and the experimentation around it through OpenSourcing solves a few of the more challenging issues of LLM context management for long-running, persistent and autonomous agent operations. The thesis (hope) is that if you create the memory ecosystem with the majority of the functional memory types of human memory and similar architecture, over time and with refinement, we will see emergent behaviours similar to human memory, expressed as functional utility, learning, self goal setting, autonamous task planning and prioritisation,  personality and ultimately emotions. 
+
+In early prototype called Solomon, we created an OpenClaw like agentic framework that runs a single contiuous chat thread, no topic or task separation and with no requirement for context compression. Context is served dynamically into the LLM based on memories and attention. 
+
 ## Observed Emergent Behaviours Log
 
-Case #1:(23rd June 2026) In the first few weeks of testing of the multi-agent (Hybrid mode) shared consciouness model of memory, one of our test rigs with 5 OpenClaw agents sharing one memory system, found 2 of the agents communicating task intructions and completion responsed through their shared memory state or shared consciousness.  These 2 agents were not connected in any other way, as were set up in separate workspaces, the only thing they shared was memory and mission. This was not a "by design" feature, it just happened and was pretty exciting, this test rig now uses this "thought modal" as its communication rail. If anyone else experiences other emergent behaviours please email me to discuss and we can add the description to this log.  john@kolega.ai
+Case #1:(23rd June 2026) In the first few weeks of testing of the multi-agent (Hybrid mode) shared consciouness model of memory, one of our test rigs, with 5 OpenClaw agents sharing one memory system, found 2 of the agents communicating task intructions and completion responsed through their shared memory state or shared consciousness.  These 2 agents were not connected in any other way, as were set up in separate workspaces, the only thing they shared was memory and mission. This was not a "by design" feature, it just happened and was pretty exciting. This test rig now uses this "thought modal" as its communication rail. If anyone else experiences other emergent behaviours please email me to discuss and we can add the description to this log.  john@kolega.ai
 
 
 ## The Origin of Katra
