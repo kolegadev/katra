@@ -31,7 +31,7 @@ It is typically initiated through physical contact with specific points on the s
 - **Transfer of the Katra**: In sacred or emergency circumstances, a mind meld can transfer a person's **katra**—their soul, consciousness, and core essence—into another living being or object prior to death.
 - **Side Effects**: The experience can be physically and emotionally draining. Incorrectly performed melds can damage neural pathways, and participants may retain "echoes" of each other's memories and personalities long after the link is broken.
 
-## Quick Start (be patient please its only new, but as you will probably already be using one of the agentic applications, it will sort out any shortcomings)
+## Quick Start (Install using one of the agentic applications, it will sort out any shortcomings)
 
 ```bash
 git clone https://github.com/kolegadev/Katra-Agentic-Memory.git
