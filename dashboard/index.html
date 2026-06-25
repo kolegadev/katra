@@ -140,9 +140,10 @@ button{padding:8px 16px;border-radius:var(--radius-sm);border:none;font-size:0.8
 <section class="tab active" id="tab-overview">
   <div class="cards cols-4" id="overview-cards"></div>
   <div class="cards cols-2" id="service-cards"></div>
-  <div class="card" style="margin-top:14px" id="pending-approvals-card" hidden>
+  <div class="card" style="margin-top:14px" id="pending-approvals-card">
     <div class="card-title">⏳ Pending Approvals — Scope B/C Tasks Requiring Human Review</div>
     <div class="table-wrap"><table><thead><tr><th>Time</th><th>Entity</th><th>Scope</th><th>Agent</th><th>Action Proposed</th><th>Actions</th></tr></thead><tbody id="pending-approvals"></tbody></table></div>
+    <div id="no-pending-msg" style="padding:16px;text-align:center;color:var(--text3)">Loading pending approvals…</div>
   </div>
 
   <div class="card" style="margin-top:14px">
@@ -394,33 +395,40 @@ async function loadOverview() {
 }
 
 async function loadPendingApprovals() {
+  const msg = document.getElementById('no-pending-msg');
+  const tbody = document.getElementById('pending-approvals');
+  
   try {
-    const r = await fetch(`${API}/memory/episodic/events?event_type=heartbeat_action&limit=20`, {headers: authHeaders()});
-    const data = await r.json();
-    const events = data?.events || data?.data || [];
+    // Query via admin diagnostics for raw events
+    const r = await fetch(`${API}/admin/diagnostics`, {headers: authHeaders()});
+    if (!r.ok) { msg.textContent = 'Enter admin key to view pending approvals'; return; }
+    
+    // Fallback: query episodic events with adaptive-heartbeat user
+    const r2 = await fetch(`${API}/memory/episodic/events?user_id=adaptive-heartbeat&limit=50`, {headers: authHeaders()});
+    const data = await r2.json();
+    const events = data?.results || data?.events || data?.data || [];
     const pending = events.filter(e => 
-      (e.metadata?.status === 'pending_approval' || e.metadata?.task_status === 'pending_approval') &&
-      e.shared_id === 'neural-link'
+      e.metadata?.status === 'pending_approval' || e.metadata?.task_status === 'pending_approval'
     );
     
-    const card = document.getElementById('pending-approvals-card');
-    const tbody = document.getElementById('pending-approvals');
-    
     if (pending.length === 0) {
-      card.hidden = true;
+      tbody.innerHTML = '';
+      msg.textContent = '✅ No pending approvals — autonomous loop is clear.';
       return;
     }
-    card.hidden = false;
+    
+    msg.textContent = '';
     tbody.innerHTML = pending.map(e => {
       const ts = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '—';
-      const entity = (e.content?.message || '').match(/Entity: (.+)/)?.[1] || 'unknown';
-      const scope = (e.content?.message || '').match(/Scope: (.+)/)?.[1] || e.metadata?.scope || 'B';
+      const msg_text = e.content?.message || '';
+      const entity = (msg_text.match(/Entity: (.+)/) || [])[1] || 'unknown';
+      const scope = 'B';
       const agent = e.metadata?.assigned_agent || '—';
-      const action = (e.content?.message || '').match(/Output: (.+)/)?.[1]?.substring(0, 100) || '—';
+      const action = (msg_text.match(/Output: (.+)/) || [])[1]?.substring(0, 100) || '—';
       return `<tr>
         <td>${ts}</td>
         <td class="mono">${entity}</td>
-        <td><span class="badge badge-${scope.includes('B')?'amber':'purple'}">Scope ${scope}</span></td>
+        <td><span class="badge badge-amber">Scope ${scope}</span></td>
         <td>${agent}</td>
         <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${action}</td>
         <td>
@@ -429,7 +437,9 @@ async function loadPendingApprovals() {
         </td>
       </tr>`;
     }).join('');
-  } catch(e) { console.error('Failed to load pending approvals:', e); }
+  } catch(e) {
+    msg.textContent = '⚠️ Could not load pending approvals — enter admin key.';
+  }
 }
 
 async function approveTask(taskId) {
