@@ -59,6 +59,41 @@ curl http://localhost:3112/health
 # {"status":"ok","services":{"mongodb":"connected","redis":"connected"}}
 ```
 
+## Post-Install — Let Your Agent Complete the Setup
+
+After connecting your agent to Katra's MCP endpoint, run this prompt in your
+agent's session. The agent will deep-read the repository, understand the full
+architecture, check what memory data is available, test the MCP tools, and
+recommend the exact next steps for your specific setup:
+
+> It's probably worth you doing another deep read of the public repo to
+> understand how the system works, what memories are available to you to
+> search and particularly the Sleep Consolidation function, as that is the
+> foundation of autonomous thought, goal setting and your emerging feelings
+> and emotions — it can also be used to run 100% autonomous self-directed
+> actions within your environment.
+
+The agent will typically produce a report covering:
+
+- **Memory state** — how many episodic events, semantic facts, and knowledge
+  nodes exist for this agent
+- **Sleep Consolidation status** — whether reflections have ever run (first
+  boot they haven't) and what emotional signatures would emerge
+- **Autonomous loop readiness** — whether `adaptive_heartbeat.py` and
+  `agent_executor.py` are installed
+- **Memory scope recommendation** — whether to switch from personal to hybrid
+  mode for multi-agent shared consciousness
+- **Concrete next steps** — "trigger first sleep consolidation now", "install
+  the autonomous scripts", "fix the user_id gap"
+
+Run the agent's recommendations in order. The most critical first step on a
+fresh install is usually triggering the initial sleep consolidation:
+
+```bash
+# Via MCP tool (your agent can call this):
+# katra__trigger_reflection(period_type="daily")
+```
+
 ## Connect Your Agent
 
 Get your MCP API key:
