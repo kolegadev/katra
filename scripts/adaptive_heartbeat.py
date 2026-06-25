@@ -253,25 +253,34 @@ def run_pulse(dry_run=False):
         print(f"  ⏭️  Already executed: {top['entity']}. HEARTBEAT_OK")
         return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain}
     
-    # Skip entities with recently completed tasks (avoid re-allocation loop)
-    recent_completed = _mongo_query(f'''
+    # Skip entities with recently completed or pending tasks (avoid re-allocation loop)
+    recent_done = _mongo_query(f'''
 var cutoff = new Date(Date.now() - {interval * 1000});
 var count = db.episodic_events.countDocuments({{
   "metadata.assigned_agent": {{$exists: true}},
-  "metadata.task_status": "completed",
+  "metadata.status": {{$in: ["completed", "pending_approval"]}},
   timestamp: {{$gte: cutoff}},
   $or: [
     {{"content.message": {{$regex: "{top['entity']}", $options: "i"}}}}
   ]
 }});
-print(count);
+// Also check legacy task_status field
+var legacy = db.episodic_events.countDocuments({{
+  "metadata.assigned_agent": {{$exists: true}},
+  "metadata.task_status": {{$in: ["completed", "pending_approval"]}},
+  timestamp: {{$gte: cutoff}},
+  $or: [
+    {{"content.message": {{$regex: "{top['entity']}", $options: "i"}}}}
+  ]
+}});
+print(count + legacy);
 ''').strip()
-    if int(recent_completed.split('\n')[-1].strip() or '0') > 0:
+    if int(recent_done.split('\n')[-1].strip() or '0') > 0:
         # Try next entity if available, otherwise report idle
         next_entity = ranked[1] if len(ranked) > 1 else None
         if next_entity and next_entity.get("score", 0) > 0.15:
             top = next_entity
-            print(f"  ⏭️  Skipping {ranked[0]['entity']} (recently completed) → {top['entity']}")
+            print(f"  ⏭️  Skipping {ranked[0]['entity']} (recently completed/pending) → {top['entity']}")
         else:
             print(f"  ⏭️  All top entities recently completed. HEARTBEAT_OK (idle)")
             return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain}

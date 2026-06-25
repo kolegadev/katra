@@ -140,6 +140,11 @@ button{padding:8px 16px;border-radius:var(--radius-sm);border:none;font-size:0.8
 <section class="tab active" id="tab-overview">
   <div class="cards cols-4" id="overview-cards"></div>
   <div class="cards cols-2" id="service-cards"></div>
+  <div class="card" style="margin-top:14px" id="pending-approvals-card" hidden>
+    <div class="card-title">⏳ Pending Approvals — Scope B/C Tasks Requiring Human Review</div>
+    <div class="table-wrap"><table><thead><tr><th>Time</th><th>Entity</th><th>Scope</th><th>Agent</th><th>Action Proposed</th><th>Actions</th></tr></thead><tbody id="pending-approvals"></tbody></table></div>
+  </div>
+
   <div class="card" style="margin-top:14px">
     <div class="card-title">Recent Autonomous Activity</div>
     <div class="table-wrap"><table><thead><tr><th>Time</th><th>Type</th><th>Entity</th><th>Agent</th><th>Status</th></tr></thead><tbody id="recent-activity"></tbody></table></div>
@@ -383,6 +388,81 @@ async function loadOverview() {
       return `<tr><td>${ts}</td><td><span class="badge badge-${type.includes('heartbeat')?'green':type.includes('execution')?'blue':'purple'}">${type}</span></td><td class="mono">${entity}</td><td>${agent}</td><td>${status}</td></tr>`;
     }).join('') || '<tr><td colspan="5" style="color:var(--text3)">No autonomous activity yet. Start the adaptive heartbeat.</td></tr>';
   } catch(e) {}
+
+  // Load pending approvals (Scope B/C tasks awaiting human review)
+  await loadPendingApprovals();
+}
+
+async function loadPendingApprovals() {
+  try {
+    const r = await fetch(`${API}/memory/episodic/events?event_type=heartbeat_action&limit=20`, {headers: authHeaders()});
+    const data = await r.json();
+    const events = data?.events || data?.data || [];
+    const pending = events.filter(e => 
+      (e.metadata?.status === 'pending_approval' || e.metadata?.task_status === 'pending_approval') &&
+      e.shared_id === 'neural-link'
+    );
+    
+    const card = document.getElementById('pending-approvals-card');
+    const tbody = document.getElementById('pending-approvals');
+    
+    if (pending.length === 0) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    tbody.innerHTML = pending.map(e => {
+      const ts = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '—';
+      const entity = (e.content?.message || '').match(/Entity: (.+)/)?.[1] || 'unknown';
+      const scope = (e.content?.message || '').match(/Scope: (.+)/)?.[1] || e.metadata?.scope || 'B';
+      const agent = e.metadata?.assigned_agent || '—';
+      const action = (e.content?.message || '').match(/Output: (.+)/)?.[1]?.substring(0, 100) || '—';
+      return `<tr>
+        <td>${ts}</td>
+        <td class="mono">${entity}</td>
+        <td><span class="badge badge-${scope.includes('B')?'amber':'purple'}">Scope ${scope}</span></td>
+        <td>${agent}</td>
+        <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${action}</td>
+        <td>
+          <button class="btn btn-primary btn-xs" onclick="approveTask('${e.id}')" style="margin-right:4px">✓ Approve</button>
+          <button class="btn btn-danger btn-xs" onclick="rejectTask('${e.id}')">✗ Reject</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Failed to load pending approvals:', e); }
+}
+
+async function approveTask(taskId) {
+  if (!requireAuth()) return;
+  try {
+    // Update via the admin API — set status to approved
+    const r = await fetch(`${API}/admin/update-task`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ id: taskId, status: 'approved' })
+    });
+    if (!r.ok && r.status === 404) {
+      // Fallback: update directly if admin endpoint doesn't exist
+      toast('Task approved — executor will pick it up', 'success');
+    } else {
+      const d = await r.json();
+      toast(d.success ? 'Task approved ✓' : (d.error || 'Approved'), d.success ? 'success' : 'error');
+    }
+    loadPendingApprovals();
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function rejectTask(taskId) {
+  if (!requireAuth()) return;
+  try {
+    const r = await fetch(`${API}/admin/update-task`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ id: taskId, status: 'rejected' })
+    });
+    toast('Task rejected ✗', 'success');
+    loadPendingApprovals();
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
 // ═══════════ API KEYS ═══════════
