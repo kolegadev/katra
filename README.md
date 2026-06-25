@@ -459,7 +459,7 @@ ingress with path routing, HPA, and PDB. See [Deployment Guide](docs/DEPLOYMENT.
 | Multi-platform watcher | ✅ 7+ platforms (in-repo) | ❌ | ❌ | ❌ |
 | Identity modes | ✅ personal/shared/hybrid | ❌ | ❌ | ❌ |
 | Dashboard | ✅ built-in | ❌ | ❌ | ❌ |
-| License | MIT | Apache 2.0 | Apache 2.0 | Proprietary |
+| License | Apache 2.0 | Apache 2.0 | Apache 2.0 | Proprietary |
 
 ## Documentation
 
