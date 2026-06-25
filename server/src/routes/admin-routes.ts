@@ -252,6 +252,16 @@ export const create_admin_routes = (): Hono => {
           events: a.count,
           last_active: a.last_active,
         })),
+        memory_scope: await (async () => {
+          try {
+            const scope = await getMemoryScope();
+            return {
+              mode: scope.mode,
+              shared_id: scope.shared_id,
+              hybrid_visible_user_ids: scope.hybrid_visible_user_ids,
+            };
+          } catch { return {}; }
+        })(),
       });
     } catch (error: any) {
       console.error('Dashboard stats error:', error.message);

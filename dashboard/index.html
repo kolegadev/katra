@@ -261,6 +261,7 @@ const API = '/api/v1';
 let currentTab = 'overview';
 let refreshTimer = null;
 let adminKey = localStorage.getItem('katra_admin_key') || '';
+let dashboardData = null; // cached from dashboard-stats
 
 // ── Auth ──
 function authHeaders() {
@@ -359,6 +360,7 @@ async function loadOverview() {
     if (!r.ok) { showLoadError(); return; }
     const data = await r.json();
     if (!data.success) { showLoadError(); return; }
+    dashboardData = data; // cache for agents tab
 
     // Service detail cards
     const svcDetail = [
@@ -521,41 +523,63 @@ async function regenerateKeys() {
 
 // ═══════════ AGENTS ═══════════
 async function loadAgents() {
-  try {
-    // Get distinct user IDs with event counts
-    const r = await fetch(`${API}/memory/episodic/events?limit=1`, {headers: authHeaders()});
-    await r.json(); // warm up
-    
-    // Try to get agent stats from diagnostics
-    const diag = await fetch(`${API}/admin/diagnostics`, {headers: authHeaders()});
-    const d = await diag.json();
-    
-    const agents = d?.agent_stats || d?.data?.agents || [];
+  // Reuse dashboard data loaded by Overview tab
+  if (dashboardData && dashboardData.agents) {
+    const agents = dashboardData.agents;
     document.getElementById('agents-table').innerHTML = agents.length > 0 ? agents.map(a => 
-      `<tr><td class="mono">${a.user_id || a.agent || '—'}</td><td>${a.events || a.count || '—'}</td><td>${a.last_active || '—'}</td><td>${a.emotional_footprint || '—'}</td><td><span class="badge badge-blue">${a.scope || 'personal'}</span></td></tr>`
-    ).join('') : '<tr><td colspan="5" style="color:var(--text3)">Load agent data by clicking Refresh after entering admin key</td></tr>';
-  } catch(e) {
-    // Fallback: get user counts from search endpoint
-    document.getElementById('agents-table').innerHTML = '<tr><td colspan="5" style="color:var(--text3)">Enter admin key and refresh to load agent data</td></tr>';
+      `<tr><td class="mono">${a.user_id || '—'}</td><td>${a.events || '—'}</td><td>${a.last_active ? new Date(a.last_active).toLocaleString() : '—'}</td><td>—</td><td><span class="badge badge-blue">personal</span></td></tr>`
+    ).join('') : '<tr><td colspan="5" style="color:var(--text3)">No agents found</td></tr>';
+  } else {
+    // Fallback: fetch directly
+    try {
+      const r = await fetch(`${API}/admin/dashboard-stats`);
+      const d = await r.json();
+      if (d.success && d.agents) {
+        dashboardData = d;
+        const agents = d.agents;
+        document.getElementById('agents-table').innerHTML = agents.map(a => 
+          `<tr><td class="mono">${a.user_id || '—'}</td><td>${a.events || '—'}</td><td>${a.last_active ? new Date(a.last_active).toLocaleString() : '—'}</td><td>—</td><td><span class="badge badge-blue">personal</span></td></tr>`
+        ).join('');
+      } else {
+        document.getElementById('agents-table').innerHTML = '<tr><td colspan="5" style="color:var(--text3)">No agent data available</td></tr>';
+      }
+    } catch(e) {
+      document.getElementById('agents-table').innerHTML = '<tr><td colspan="5" style="color:var(--text3)">Unable to load agent data</td></tr>';
+    }
   }
   loadScope();
 }
 
 async function loadScope() {
-  try {
-    const r = await fetch(`${API}/admin/memory-scope`, {headers: authHeaders()});
-    const d = await r.json();
-    if (d.scope) {
-      document.getElementById('scope-mode').value = d.scope.mode || 'personal';
-      document.getElementById('scope-shared-id').value = d.scope.shared_id || '';
-      document.getElementById('scope-visible-ids').value = (d.scope.hybrid_visible_user_ids || []).join(', ');
-      document.getElementById('scope-current').innerHTML = `
-        <p><strong>Mode:</strong> <span class="badge badge-${d.scope.mode==='shared'?'green':d.scope.mode==='hybrid'?'purple':'blue'}">${d.scope.mode}</span></p>
-        <p><strong>Shared ID:</strong> ${d.scope.shared_id || 'not set'}</p>
-        <p><strong>Visible Users:</strong> ${(d.scope.hybrid_visible_user_ids||[]).join(', ') || 'none'}</p>`;
-      document.getElementById('scope-badge').textContent = d.scope.mode;
-    }
-  } catch(e) {}
+  // Use cached dashboard data for display (no auth)
+  const scope = (dashboardData && dashboardData.memory_scope) ? dashboardData.memory_scope : null;
+  
+  if (scope && scope.mode) {
+    document.getElementById('scope-mode').value = scope.mode || 'personal';
+    document.getElementById('scope-shared-id').value = scope.shared_id || '';
+    document.getElementById('scope-visible-ids').value = (scope.hybrid_visible_user_ids || []).join(', ');
+    document.getElementById('scope-current').innerHTML = `
+      <p><strong>Mode:</strong> <span class="badge badge-${scope.mode==='shared'?'green':scope.mode==='hybrid'?'purple':'blue'}">${scope.mode}</span></p>
+      <p><strong>Shared ID:</strong> ${scope.shared_id || 'not set'}</p>
+      <p><strong>Visible Users:</strong> ${(scope.hybrid_visible_user_ids||[]).join(', ') || 'none'}</p>`;
+    document.getElementById('scope-badge').textContent = scope.mode;
+  } else {
+    // Fallback: try with auth for explicit Reload click
+    try {
+      const r = await fetch(`${API}/admin/memory-scope`, {headers: authHeaders()});
+      const d = await r.json();
+      if (d.scope) {
+        document.getElementById('scope-mode').value = d.scope.mode || 'personal';
+        document.getElementById('scope-shared-id').value = d.scope.shared_id || '';
+        document.getElementById('scope-visible-ids').value = (d.scope.hybrid_visible_user_ids || []).join(', ');
+        document.getElementById('scope-current').innerHTML = `
+          <p><strong>Mode:</strong> <span class="badge badge-${d.scope.mode==='shared'?'green':d.scope.mode==='hybrid'?'purple':'blue'}">${d.scope.mode}</span></p>
+          <p><strong>Shared ID:</strong> ${d.scope.shared_id || 'not set'}</p>
+          <p><strong>Visible Users:</strong> ${(d.scope.hybrid_visible_user_ids||[]).join(', ') || 'none'}</p>`;
+        document.getElementById('scope-badge').textContent = d.scope.mode;
+      }
+    } catch(e) {}
+  }
 }
 
 async function saveScope() {
