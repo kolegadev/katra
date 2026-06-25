@@ -26,6 +26,12 @@ services:
     command: ["--bind_ip_all", "--auth"]
     networks:
       - katra-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   # ── Redis ────────────────────────────────────────────────────────
   redis:
@@ -37,6 +43,12 @@ services:
     command: redis-server --appendonly yes
     networks:
       - katra-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # ── MinIO (S3-compatible object storage for assets) ──────────────
   minio:
@@ -66,9 +78,12 @@ services:
     env_file:
       - .env
     depends_on:
-      - mongo
-      - redis
-      - minio
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
     networks:
       - katra-net
 

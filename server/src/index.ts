@@ -48,9 +48,20 @@ async function main() {
   console.log('  Katra — Cognitive Memory as a Service');
   console.log('═══════════════════════════════════════════');
 
-  // Connect to MongoDB
-  await connect_to_mongodb();
-  console.log(`  MongoDB: ${is_database_connected() ? '✅ connected' : '⚠️ offline mode'}`);
+  // Connect to MongoDB with retry (handles Pi5 cold-start race where
+  // Mongo auth takes longer than docker-compose healthcheck allows)
+  const maxRetries = 5;
+  let mongoOk = false;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    await connect_to_mongodb();
+    if (is_database_connected()) { mongoOk = true; break; }
+    if (attempt < maxRetries) {
+      const delay = attempt * 2000;
+      console.log(`  MongoDB not ready (attempt ${attempt}/${maxRetries}), retrying in ${delay / 1000}s...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  console.log(`  MongoDB: ${mongoOk ? '✅ connected' : '⚠️ offline mode'}`);
 
   // Ensure API keys are available (generate + persist if missing).
   // validateKatraKey() / validateMcpKey() are now the authoritative validators;
