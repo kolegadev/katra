@@ -354,10 +354,10 @@ export class BackgroundProcessor {
     eventType: string,
     userId: string
   ): Promise<void> {
-    // 1. Embed the source episodic event
+    // 1. Embed the source episodic event (use custom id field, not _id)
     const eventEmbedding = await embeddingService.encode(content, eventType);
     if (eventEmbedding) {
-      await embeddingService.storeEmbedding('episodic_events', { id: eventId }, eventEmbedding);
+      await embeddingService.storeEmbedding('episodic_events', eventId, eventEmbedding, { id: eventId });
       console.log(`🧠 Embedded episodic event ${eventId.slice(-8)}`);
     }
 
@@ -365,7 +365,9 @@ export class BackgroundProcessor {
     try {
       const { get_database } = await import('../database/connection.js');
       const db = get_database();
-      const facts = await db.collection('semantic_facts')
+
+      // 2a. Event-linked facts from extraction pipeline
+      const linkedFacts = await db.collection('semantic_facts')
         .find({
           user_id: userId,
           'metadata.extraction_context.source_event_id': eventId,
@@ -374,20 +376,34 @@ export class BackgroundProcessor {
         .limit(20)
         .toArray();
 
-      if (facts.length > 0) {
-        const texts = facts.map((f: any) => ({
+      // 2b. Any remaining un-embedded facts for this user
+      //     Catches MCP-tool stored facts, time-block summaries, etc.
+      const embeddedIds = linkedFacts.map((f: any) => f._id);
+      const otherFacts = await db.collection('semantic_facts')
+        .find({
+          user_id: userId,
+          embedding: { $exists: false },
+          _id: { $nin: embeddedIds },
+        })
+        .limit(20)
+        .toArray();
+
+      const allFacts = [...linkedFacts, ...otherFacts];
+
+      if (allFacts.length > 0) {
+        const texts = allFacts.map((f: any) => ({
           text: f.content || '',
           eventType: 'semantic_fact',
         }));
         const embeddings = await embeddingService.encodeBatch(texts);
 
-        for (let i = 0; i < facts.length; i++) {
+        for (let i = 0; i < allFacts.length; i++) {
           const vec = embeddings[i];
           if (vec) {
-            await embeddingService.storeEmbedding('semantic_facts', facts[i]._id, vec);
+            await embeddingService.storeEmbedding('semantic_facts', allFacts[i]._id, vec);
           }
         }
-        console.log(`🧠 Embedded ${embeddings.filter(Boolean).length}/${facts.length} semantic facts for event ${eventId.slice(-8)}`);
+        console.log(`🧠 Embedded ${embeddings.filter(Boolean).length}/${allFacts.length} semantic facts (${linkedFacts.length} linked, ${otherFacts.length} other)`);
       }
     } catch (e: any) {
       console.warn('⚠️ Failed to embed semantic facts:', e.message);

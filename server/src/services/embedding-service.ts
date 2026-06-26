@@ -247,16 +247,24 @@ export class EmbeddingService {
   /**
    * Store embedding on an existing document in MongoDB.
    * Non-blocking: logs warning on failure, never throws.
+   *
+   * @param collection — MongoDB collection name
+   * @param documentId — either a string (used as _id) or an object (used as-is)
+   * @param embedding   — the vector to store
+   * @param filter      — optional custom filter, overrides the _id default.
+   *                       Use when the collection uses a custom id field (e.g. episodic_events)
    */
   async storeEmbedding(
     collection: string,
     documentId: string | any,
-    embedding: number[]
+    embedding: number[],
+    filter?: Record<string, any>
   ): Promise<void> {
     try {
       const db = get_database();
+      const query = filter || { _id: typeof documentId === 'string' ? documentId : documentId };
       await db.collection(collection).updateOne(
-        { _id: typeof documentId === 'string' ? documentId : documentId },
+        query,
         {
           $set: {
             embedding,

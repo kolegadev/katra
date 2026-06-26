@@ -627,6 +627,13 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
     confidence: input.confidence,
     source,
     timestamp: new Date(),
+    metadata: {
+      source,
+      extraction_context: {
+        source: 'mcp_store',
+        timestamp: new Date().toISOString(),
+      },
+    },
   };
   if (tags.length > 0) doc.tags = tags;
   if (sharedId) doc.shared_id = sharedId;
