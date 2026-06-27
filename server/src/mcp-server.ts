@@ -252,7 +252,7 @@ const GetJournalInput = z.object({
 const StoreJournalInput = z.object({
   user_id: z.string().describe('User ID'),
   shared_id: z.string().optional().describe('Optional shared ID for communal memory (used in shared/hybrid mode)'),
-  entry: z.string().min(1).describe('Journal entry text'),
+  entry: z.string().min(1).max(4000, 'Journal entry too long — keep under 4000 characters').describe('Journal entry text'),
   source: z.enum(['manual', 'system']).optional().default('manual'),
   tags: z.array(z.string()).optional().describe('Optional tags'),
 });
@@ -1173,6 +1173,12 @@ async function handleGetJournal(args: unknown): Promise<TextContent[]> {
 }
 
 async function handleStoreJournal(args: unknown): Promise<TextContent[]> {
+  // Log raw args to catch transport-level truncation issues
+  const rawEntry = (args as any)?.entry;
+  if (rawEntry === undefined || rawEntry === null) {
+    console.error('❌ store_journal: entry field missing — possible MCP transport truncation');
+    console.error('   raw args keys:', Object.keys(args as any || {}).join(', '));
+  }
   const input = StoreJournalInput.parse(args);
   if (!is_database_connected()) return [{ type: 'text', text: '⚠️ MongoDB disconnected.' }];
 
