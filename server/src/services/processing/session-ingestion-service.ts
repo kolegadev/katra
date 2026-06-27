@@ -10,7 +10,7 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getEpisodicEventManager, EpisodicEventData } from './episodic-event-manager.js';
+import { getEpisodicEventManager, EpisodicEventData } from '../memory/episodic-event-manager.js';
 
 export interface IngestionState {
   lastIngestedTimestamp: string;

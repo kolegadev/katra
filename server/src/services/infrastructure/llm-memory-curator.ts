@@ -9,12 +9,12 @@
  */
 
 import { LLMService } from './llm-service.js';
-import { MemoryManager } from './memory-manager.js';
+import { MemoryManager } from '../memory/memory-manager.js';
 import { queryOrchestrationService } from './query-orchestration-service.js';
-import { escape_regex } from '../utils/regex-escape.js';
-import { CAPABILITY_CARD } from './capability-card.js';
+import { escape_regex } from '../../utils/regex-escape.js';
+import { CAPABILITY_CARD } from '../integration/capability-card.js';
 import { temporalResolver } from './temporal-resolver.js';
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import { embeddingService } from './embedding-service.js';
 
 export interface MemoryTrigger {
@@ -323,7 +323,7 @@ Respond with a JSON array of memory type names, e.g., ["episodic", "semantic"]`;
       let journalResults: any[] = [];
       if (enhancedRecall) {
         try {
-          const { getProspectiveMemoryService } = await import('./knowledge-graph-factory.js');
+          const { getProspectiveMemoryService } = await import('../integration/knowledge-graph-factory.js');
           const prospective = getProspectiveMemoryService();
           const journalEntries = await prospective.searchAutoJournal(userId, userInput, 5);
           journalResults = journalEntries.map(e => ({

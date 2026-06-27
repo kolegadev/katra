@@ -8,14 +8,14 @@
  * episodic_events -> semantic parsing -> knowledge_nodes/relationships/semantic_facts
  */
 
-import { MemoryManager } from './memory-manager.js';
+import { MemoryManager } from '../memory/memory-manager.js';
 import { extraction_service, ExtractionContext } from './extraction-service.js';
 import { dispatch_service, DispatchContext } from './dispatch-service.js';
-import { getEpisodicEventManager } from './episodic-event-manager.js';
+import { getEpisodicEventManager } from '../memory/episodic-event-manager.js';
 import { TimeBlockSummarizer } from './time-block-summarizer.js';
-import { ProspectiveMemoryService } from './prospective-memory-service.js';
-import { embeddingService } from './embedding-service.js';
-import { entityResolver } from './entity-resolver.js';
+import { ProspectiveMemoryService } from '../memory/prospective-memory-service.js';
+import { embeddingService } from '../infrastructure/embedding-service.js';
+import { entityResolver } from '../integration/entity-resolver.js';
 
 export class BackgroundProcessor {
   private static instance: BackgroundProcessor;
@@ -146,7 +146,7 @@ export class BackgroundProcessor {
       // (~5 min at 30s interval). Only does work when session has > 5 events.
       if (this.processingCycleCount % 10 === 0) {
         try {
-          const { get_database: gdb } = await import('../database/connection.js');
+          const { get_database: gdb } = await import('../../database/connection.js');
           const db2 = gdb();
           const prospective = new ProspectiveMemoryService(db2);
 
@@ -179,7 +179,7 @@ export class BackgroundProcessor {
       // Auto-expire missions paused > 24h (every 60 cycles ~30 min)
       if (this.processingCycleCount % 60 === 0) {
         try {
-          const { get_database } = await import('../database/connection.js');
+          const { get_database } = await import('../../database/connection.js');
           const db = get_database();
           const prospective = new ProspectiveMemoryService(db);
           await prospective.autoExpireMissions();
@@ -226,7 +226,7 @@ export class BackgroundProcessor {
     try {
       // Check if processing was completed by another process while we were waiting
       try {
-        const { get_database } = await import('../database/connection.js');
+        const { get_database } = await import('../../database/connection.js');
         const db = get_database();
         const currentEvent = await db.collection('episodic_events').findOne({ id: eventId });
         if (currentEvent?.metadata?.processed === true) {
@@ -398,7 +398,7 @@ export class BackgroundProcessor {
 
     // 2. Find and embed newly created semantic facts for this event
     try {
-      const { get_database } = await import('../database/connection.js');
+      const { get_database } = await import('../../database/connection.js');
       const db = get_database();
 
       // 2a. Event-linked facts from extraction pipeline
@@ -615,7 +615,7 @@ export class BackgroundProcessor {
    */
   private async checkIdempotency(idempotencyKey: string): Promise<boolean> {
     try {
-      const { get_database } = await import('../database/connection.js');
+      const { get_database } = await import('../../database/connection.js');
       const db = get_database();
       const processingLogCollection = db.collection('processing_log');
       
@@ -636,7 +636,7 @@ export class BackgroundProcessor {
    */
   private async createProcessingLogEntry(idempotencyKey: string, eventId: string, sessionId: string): Promise<void> {
     try {
-      const { get_database } = await import('../database/connection.js');
+      const { get_database } = await import('../../database/connection.js');
       const db = get_database();
       const processingLogCollection = db.collection('processing_log');
       
@@ -659,7 +659,7 @@ export class BackgroundProcessor {
    */
   private async updateProcessingLogEntry(idempotencyKey: string, status: string, results?: any): Promise<void> {
     try {
-      const { get_database } = await import('../database/connection.js');
+      const { get_database } = await import('../../database/connection.js');
       const db = get_database();
       const processingLogCollection = db.collection('processing_log');
       

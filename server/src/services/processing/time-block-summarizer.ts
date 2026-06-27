@@ -9,8 +9,8 @@
  * every chat message — it's CPU/LLM-intensive and runs as a batch job.
  */
 
-import { get_database } from '../database/connection.js';
-import { llmService } from './llm-service.js';
+import { get_database } from '../../database/connection.js';
+import { llmService } from '../infrastructure/llm-service.js';
 
 interface TimeBlockSummary {
   user_id: string;

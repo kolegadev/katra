@@ -1,4 +1,4 @@
-import { MemoryManager } from './memory-manager.js';
+import { MemoryManager } from '../memory/memory-manager.js';
 import { ExtractionResult, ExtractionContext } from './extraction-service.js';
 
 export interface DispatchResult {

@@ -11,7 +11,7 @@
  * into the cognitive context pipeline.
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 
 interface RecurringTopic {
   topic: string;

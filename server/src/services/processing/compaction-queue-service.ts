@@ -12,7 +12,7 @@
  *   Idle timer fires → processQueue() → compactEpisodicToGraph()
  */
 
-import { SemanticMemoryService } from './semantic-memory-service.js';
+import { SemanticMemoryService } from '../memory/semantic-memory-service.js';
 
 interface CompactionTask {
   userId: string;

@@ -5,9 +5,9 @@
  * from other sessions when a user asks questions in a new session.
  */
 
-import { get_database } from '../database/connection.js';
-import { MemoryManager } from './memory-manager.js';
-import type { EpisodicEvent, SemanticFact, KnowledgeNode } from '../types/memory.js';
+import { get_database } from '../../database/connection.js';
+import { MemoryManager } from '../memory/memory-manager.js';
+import type { EpisodicEvent, SemanticFact, KnowledgeNode } from '../../types/memory.js';
 
 export interface CrossSessionContext {
   userId: string;

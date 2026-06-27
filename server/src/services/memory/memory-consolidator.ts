@@ -5,9 +5,9 @@
  * and identifying patterns across conversations for better memory recall.
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import { MemoryManager } from './memory-manager.js';
-import type { EpisodicEvent, SemanticFact, KnowledgeNode } from '../types/memory.js';
+import type { EpisodicEvent, SemanticFact, KnowledgeNode } from '../../types/memory.js';
 
 export interface UserMemoryProfile {
   userId: string;

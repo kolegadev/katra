@@ -14,10 +14,10 @@
  * instance. See SECURITY.md for details.
  */
 
-import { get_database } from '../database/connection.js';
-import { llmService } from './llm-service.js';
-import { ReflectionStore } from './reflection-store.js';
-import { DEFAULT_USER_ID } from './memory-scope-service.js';
+import { get_database } from '../../database/connection.js';
+import { llmService } from '../infrastructure/llm-service.js';
+import { ReflectionStore } from '../infrastructure/reflection-store.js';
+import { DEFAULT_USER_ID } from '../memory/memory-scope-service.js';
 import type {
   GatheredData,
   ReflectionLLMOutput,
@@ -26,7 +26,7 @@ import type {
   ReflectionNode,
   ReflectionEdge,
   PhilosophicalInsight,
-} from '../types/memory.js';
+} from '../../types/memory.js';
 
 interface ScheduleConfig {
   daily: { hour: number; minute: number };

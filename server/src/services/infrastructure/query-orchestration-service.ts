@@ -1,9 +1,9 @@
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import { ObjectId } from 'mongodb';
-import { crossSessionIntegrator } from './cross-session-integrator.js';
+import { crossSessionIntegrator } from '../processing/cross-session-integrator.js';
 import { semanticIndexer } from './semantic-indexer.js';
-import { entityResolver } from './entity-resolver.js';
-import { memoryConsolidator } from './memory-consolidator.js';
+import { entityResolver } from '../integration/entity-resolver.js';
+import { memoryConsolidator } from '../memory/memory-consolidator.js';
 
 export interface QueryPlan {
   id: string;

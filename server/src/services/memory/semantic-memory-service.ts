@@ -10,7 +10,7 @@
  */
 
 import { Db } from 'mongodb';
-import { llmService } from './llm-service.js';
+import { llmService } from '../infrastructure/llm-service.js';
 
 export interface Triplet {
   source: string;

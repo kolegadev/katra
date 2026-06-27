@@ -6,13 +6,13 @@
  * emotional understanding, reflective narrative, and philosophical insight.
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import type {
   ReflectiveJournal,
   ReflectionNode,
   ReflectionEdge,
   PhilosophicalInsight,
-} from '../types/memory.js';
+} from '../../types/memory.js';
 import { ObjectId } from 'mongodb';
 
 export class ReflectionStore {

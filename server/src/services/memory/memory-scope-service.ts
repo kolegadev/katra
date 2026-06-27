@@ -7,8 +7,8 @@
  * - hybrid: personal first, then shared, then other visible user_ids
  */
 
-import { get_database } from '../database/connection.js';
-import { getTenantContext } from '../database/tenant-context.js';
+import { get_database } from '../../database/connection.js';
+import { getTenantContext } from '../../database/tenant-context.js';
 
 /**
  * System-wide default user id. Used as the fallback for both store and search

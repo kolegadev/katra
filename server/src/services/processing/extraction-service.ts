@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { llmService } from './llm-service.js';
+import { llmService } from '../infrastructure/llm-service.js';
 
 // Types for structured extraction
 export interface ExtractedEntity {

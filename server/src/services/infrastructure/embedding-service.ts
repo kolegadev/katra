@@ -11,7 +11,7 @@
  * - Batch-friendly: encode() accepts single string or array
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 
 // Quality filter: skip low-value content that would pollute retrieval
 const SKIP_PATTERNS = [

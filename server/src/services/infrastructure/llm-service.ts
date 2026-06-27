@@ -26,7 +26,7 @@ const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string }> = {
 };
 
 async function get_db() {
-  const { get_database } = await import('../database/connection.js');
+  const { get_database } = await import('../../database/connection.js');
   return get_database();
 }
 

@@ -5,9 +5,9 @@
  * and provides database performance monitoring for the cognitive memory architecture.
  */
 
-import { get_database } from '../database/connection.js';
-import { get_redis_client } from '../database/redis-connection.js';
-import { performance_monitor, record_cache_event } from '../middleware/performance-monitoring.js';
+import { get_database } from '../../database/connection.js';
+import { get_redis_client } from '../../database/redis-connection.js';
+import { performance_monitor, record_cache_event } from '../../middleware/performance-monitoring.js';
 
 export interface QueryPattern {
     collection: string;

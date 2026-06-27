@@ -7,9 +7,9 @@
  */
 
 import { createHash, randomUUID } from 'crypto';
-import { get_database } from '../database/connection.js';
-import { get_redis_client } from '../database/redis-connection.js';
-import { llmService } from './llm-service.js';
+import { get_database } from '../../database/connection.js';
+import { get_redis_client } from '../../database/redis-connection.js';
+import { llmService } from '../infrastructure/llm-service.js';
 import type { Db, Collection } from 'mongodb';
 
 /**
@@ -717,7 +717,7 @@ export class EpisodicEventManager {
         console.log(`🚀 Event-driven processing triggered for ${eventIdsToProcess.length} new events`);
         
         // Import and trigger background processor
-        const { backgroundProcessor } = await import('./background-processor.js');
+        const { backgroundProcessor } = await import('../processing/background-processor.js');
         backgroundProcessor.processUnprocessedEvents();
         
       } catch (error) {

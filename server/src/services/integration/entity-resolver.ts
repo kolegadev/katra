@@ -5,9 +5,9 @@
  * across sessions and reduce entity duplication in the knowledge graph.
  */
 
-import { get_database } from '../database/connection.js';
-import { MemoryManager } from './memory-manager.js';
-import type { KnowledgeNode, KnowledgeRelationship } from '../types/memory.js';
+import { get_database } from '../../database/connection.js';
+import { MemoryManager } from '../memory/memory-manager.js';
+import type { KnowledgeNode, KnowledgeRelationship } from '../../types/memory.js';
 
 export interface EntityResolutionContext {
   userId: string;

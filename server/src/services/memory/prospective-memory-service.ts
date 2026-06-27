@@ -12,7 +12,7 @@
  */
 
 import { Db, ObjectId } from 'mongodb';
-import { llmService } from './llm-service.js';
+import { llmService } from '../infrastructure/llm-service.js';
 
 export interface MissionTask {
   id: string;
@@ -585,7 +585,7 @@ export class ProspectiveMemoryService {
       
       // Store directive applications as episodic events for memory recall
       try {
-        const { MemoryManager } = await import('../services/memory-manager.js');
+        const { MemoryManager } = await import('./memory-manager.js');
         const memoryManager = MemoryManager.get_instance();
         if (mission.session_id && mission.user_id) {
           await memoryManager.store_event({

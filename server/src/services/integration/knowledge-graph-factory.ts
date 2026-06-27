@@ -3,11 +3,11 @@
  * All services require the database, which is available after MongoDB connects.
  */
 
-import { get_database } from '../database/connection.js';
-import { SemanticMemoryService } from './semantic-memory-service.js';
-import { CompactionQueueService } from './compaction-queue-service.js';
-import { MemorySynthesisService } from './memory-synthesis-service.js';
-import { ProspectiveMemoryService } from './prospective-memory-service.js';
+import { get_database } from '../../database/connection.js';
+import { SemanticMemoryService } from '../memory/semantic-memory-service.js';
+import { CompactionQueueService } from '../processing/compaction-queue-service.js';
+import { MemorySynthesisService } from '../memory/memory-synthesis-service.js';
+import { ProspectiveMemoryService } from '../memory/prospective-memory-service.js';
 
 let semanticMemoryService: SemanticMemoryService | null = null;
 let compactionQueueService: CompactionQueueService | null = null;

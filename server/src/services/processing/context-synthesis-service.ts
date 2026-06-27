@@ -1,4 +1,4 @@
-import { QueryResult, AggregatedResult } from './query-orchestration-service.js';
+import { QueryResult, AggregatedResult } from '../infrastructure/query-orchestration-service.js';
 
 export interface ContextTemplate {
   name: string;

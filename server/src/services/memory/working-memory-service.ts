@@ -5,8 +5,8 @@
  * Implements full memory management, session context, and performance monitoring.
  */
 
-import { get_redis_client, is_redis_healthy } from '../database/redis-connection.js';
-import { get_database } from '../database/connection.js';
+import { get_redis_client, is_redis_healthy } from '../../database/redis-connection.js';
+import { get_database } from '../../database/connection.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface WorkingMemoryItem {

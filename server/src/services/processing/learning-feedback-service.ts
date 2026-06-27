@@ -6,9 +6,9 @@
  * system to learn and improve from user interactions over time.
  */
 
-import { get_database } from '../database/connection.js';
-import { get_redis_client } from '../database/redis-connection.js';
-import { working_memory_service } from './working-memory-service.js';
+import { get_database } from '../../database/connection.js';
+import { get_redis_client } from '../../database/redis-connection.js';
+import { working_memory_service } from '../memory/working-memory-service.js';
 // import { memory_synthesis_engine } from './memory_synthesis_service.js';
 import { v4 as uuidv4 } from 'uuid';
 

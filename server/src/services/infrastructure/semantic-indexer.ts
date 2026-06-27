@@ -5,9 +5,9 @@
  * and context-aware retrieval for more accurate memory recall.
  */
 
-import { get_database } from '../database/connection.js';
-import { MemoryManager } from './memory-manager.js';
-import type { SemanticFact, KnowledgeNode, EpisodicEvent } from '../types/memory.js';
+import { get_database } from '../../database/connection.js';
+import { MemoryManager } from '../memory/memory-manager.js';
+import type { SemanticFact, KnowledgeNode, EpisodicEvent } from '../../types/memory.js';
 
 export interface SemanticIndex {
   id: string;

@@ -3,9 +3,9 @@
  * Clean version without duplicate functions
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import { ObjectId } from 'mongodb';
-import { generateContentHash, generateIdempotencyKey, stableContentHash } from './content-hash-utils.js';
+import { generateContentHash, generateIdempotencyKey, stableContentHash } from '../infrastructure/content-hash-utils.js';
 import type { 
   EpisodicEvent, 
   KnowledgeNode, 
@@ -14,7 +14,7 @@ import type {
   SemanticFact,
   AssetMetadata,
   MemorySystemHealth 
-} from '../types/memory.js';
+} from '../../types/memory.js';
 
 export class MemoryManager {
   private static instance: MemoryManager;

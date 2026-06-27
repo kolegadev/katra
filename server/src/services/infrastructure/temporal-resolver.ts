@@ -8,7 +8,7 @@
  * Created as part of Phase 3 of the memory system temporal upgrade (2026-06-14).
  */
 
-import { get_database } from '../database/connection.js';
+import { get_database } from '../../database/connection.js';
 import type { Db, Collection } from 'mongodb';
 
 export interface TemporalQueryResult {
