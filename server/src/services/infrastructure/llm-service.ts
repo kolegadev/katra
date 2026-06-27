@@ -1,6 +1,6 @@
 import net from 'node:net';
 import OpenAI from 'openai';
-import { CAPABILITY_CARD } from './capability-card.js';
+import { CAPABILITY_CARD } from '../integration/capability-card.js';
 
 interface LLMProvider {
   name: string;
