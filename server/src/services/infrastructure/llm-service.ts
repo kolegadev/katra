@@ -125,8 +125,30 @@ export class LLMService {
   private providers: LLMProvider[] = [];
   private available: boolean = false;
 
+  // Cache performance tracking
+  public cacheStats = {
+    totalCalls: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    cachedTokens: 0,
+    totalTokens: 0,
+    lastReset: new Date().toISOString(),
+  };
+
   constructor() {
     this.initialize();
+  }
+
+  /** Reset cache stats (called from monitoring endpoint on request). */
+  resetCacheStats(): void {
+    this.cacheStats = {
+      totalCalls: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      cachedTokens: 0,
+      totalTokens: 0,
+      lastReset: new Date().toISOString(),
+    };
   }
 
   /**
@@ -303,10 +325,16 @@ export class LLMService {
     // Chunk large inputs (e.g. full conversation transcripts) so the model can
     // actually distill them instead of truncating. Each chunk is extracted
     // independently and the results are merged + deduplicated.
+    // Maximum 2 chunks (12K chars) to limit LLM cost on very large transcripts.
     const CHUNK_SIZE = 6000;
+    const MAX_CHUNKS = 2;
     const chunks = inputText.length <= CHUNK_SIZE
       ? [inputText]
-      : this.chunkText(inputText, CHUNK_SIZE);
+      : this.chunkText(inputText, CHUNK_SIZE).slice(0, MAX_CHUNKS);
+
+    if (inputText.length > CHUNK_SIZE * MAX_CHUNKS) {
+      console.log(`⚠️ Input truncated for extraction: ${inputText.length} chars → ${CHUNK_SIZE * MAX_CHUNKS} chars (${MAX_CHUNKS} chunks max)`);
+    }
 
     const merged: any = { knowledge: [], entities: [], relationships: [], activities: [] };
 
@@ -361,7 +389,9 @@ export class LLMService {
 
   /** Run the extraction LLM call for a single chunk and parse JSON. */
   private async extractSingleChunk(provider: any, chunkText: string, context?: string): Promise<any> {
-    const prompt = this.buildExtractionPrompt(chunkText, context);
+    const contextStr = context ? `Context: ${context}\n\n` : '';
+    const userPrompt = `${contextStr}Text to distill:\n"""\n${chunkText}\n"""\n\nReturn ONLY valid JSON.`;
+
     let content: string | null = null;
 
     try {
@@ -369,14 +399,28 @@ export class LLMService {
       const response = await client.chat.completions.create({
         model: provider.model,
         messages: [
-          { role: 'system', content: 'You are a cognitive memory distiller. Always respond with valid JSON only, no prose.' },
-          { role: 'user', content: prompt },
+          { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.1,
         max_tokens: 1500,
       });
       const msg = response.choices[0]?.message as any;
       content = msg?.content || msg?.reasoning_content || null;
+
+      // Track cache performance (DeepSeek reports prompt_tokens_details.cached_tokens)
+      const usage = response.usage as any;
+      if (usage) {
+        this.cacheStats.totalCalls++;
+        this.cacheStats.totalTokens += usage.prompt_tokens || 0;
+        const cached = usage.prompt_tokens_details?.cached_tokens || usage.prompt_cache_hit_tokens || 0;
+        if (cached > 0) {
+          this.cacheStats.cacheHits++;
+          this.cacheStats.cachedTokens += cached;
+        } else {
+          this.cacheStats.cacheMisses++;
+        }
+      }
     } catch (error: any) {
       if (error?.status === 401 || error?.status === 403) {
         provider.available = false;
@@ -646,10 +690,11 @@ CRITICAL RULES:
     return result.sort((a, b) => b.score - a.score);
   }
 
-  private buildExtractionPrompt(inputText: string, context?: string): string {
-    const contextStr = context ? `Context: ${context}\n\n` : '';
-
-    return `${contextStr}You are a cognitive memory distiller. Your job is to compress a conversation into a SMALL set of concise, self-contained, high-signal facts that an AI agent would want to recall later.
+/**
+ * Cached extraction system prompt — kept in system role so DeepSeek
+ * auto-caches it across calls. The variable content goes in the user message.
+ */
+const EXTRACTION_SYSTEM_PROMPT = `You are a cognitive memory distiller. Your job is to compress a conversation into a SMALL set of concise, self-contained, high-signal facts that an AI agent would want to recall later.
 
 Quality bar (this is the most important part):
 - CONCISE: each fact is one short, self-contained sentence. No paragraphs, no transcripts.
@@ -658,12 +703,7 @@ Quality bar (this is the most important part):
 - SELF-CONTAINED: a fact must make sense on its own without the surrounding conversation.
 - HONEST: only state what the text actually supports. Do not invent.
 
-Text to distill:
-"""
-${inputText}
-"""
-
-Return ONLY valid JSON in exactly this shape:
+Always respond with valid JSON only, no prose. Return ONLY valid JSON in exactly this shape:
 {
   "knowledge": [
     {
@@ -692,9 +732,8 @@ Rules:
 Example input: "I'm building gh-hygiene, a CLI to manage my 120 GitHub repos. I want DeepSeek to decide what to archive. The dashboard keeps showing 'degraded' because Redis won't connect."
 Example output:
 {"knowledge":[{"knowledge_type":"goal","content":"User is building gh-hygiene, a CLI tool to manage ~120 GitHub repos (settings, permissions, cleanup, archiving).","domain":"devtools","confidence":0.95},{"knowledge_type":"preference","content":"User wants DeepSeek V4 Flash as the decision/LLM model for gh-hygiene.","domain":"devtools","confidence":0.9},{"knowledge_type":"problem","content":"Katra dashboard shows 'degraded' status due to Redis not connecting.","domain":"infra","confidence":0.85}],"entities":[{"name":"gh-hygiene","type":"project","confidence":0.95},{"name":"DeepSeek V4 Flash","type":"tool","confidence":0.9},{"name":"Katra","type":"project","confidence":0.85}],"relationships":[{"from_entity":"gh-hygiene","to_entity":"DeepSeek V4 Flash","relationship_type":"uses","confidence":0.9}],"activities":[{"activity_type":"goal","description":"Manage and clean up ~120 GitHub repos via gh-hygiene.","confidence":0.9}]}`;
-  }
 
-  public async generateChatResponse(
+export const llmService = new LLMService();
     messages: Array<{ role: string; content: string }>,
     options?: { temperature?: number; maxTokens?: number }
   ): Promise<string> {

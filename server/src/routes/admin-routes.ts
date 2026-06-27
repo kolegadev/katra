@@ -1289,5 +1289,41 @@ export const create_admin_routes = (): Hono => {
     }
   });
 
+  /**
+   * LLM cache performance monitoring.
+   * Tracks prompt cache hit/miss rates and token savings across extraction calls.
+   * GET /cache-stats  — current stats since last reset
+   * DELETE /cache-stats — reset counters
+   */
+  router.get('/cache-stats', async (c) => {
+    const stats = llmService.cacheStats;
+    const hitRate = stats.totalCalls > 0
+      ? ((stats.cacheHits / stats.totalCalls) * 100).toFixed(1)
+      : '0.0';
+    const averageSavings = stats.cachedTokens > 0 && (stats.cachedTokens + stats.totalTokens - stats.cachedTokens) > 0
+      ? ((stats.cachedTokens / stats.totalTokens) * 100).toFixed(1)
+      : '0.0';
+
+    return c.json({
+      success: true,
+      since: stats.lastReset,
+      total_calls: stats.totalCalls,
+      cache_hits: stats.cacheHits,
+      cache_misses: stats.cacheMisses,
+      hit_rate_percent: `${hitRate}%`,
+      cached_tokens: stats.cachedTokens,
+      total_prompt_tokens: stats.totalTokens,
+      token_savings_percent: `${averageSavings}%`,
+      interpretation: stats.totalCalls > 0
+        ? `System prompt caching saves ~${averageSavings}% of prompt tokens when working`
+        : 'No extraction calls recorded since last reset',
+    });
+  });
+
+  router.delete('/cache-stats', async (c) => {
+    llmService.resetCacheStats();
+    return c.json({ success: true, message: 'Cache stats reset' });
+  });
+
   return router;
 };

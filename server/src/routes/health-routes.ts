@@ -57,40 +57,24 @@ export const create_diagnostic_routes = (): Hono => {
         };
       }
 
-      // Test 2: LLM Service availability
-      console.log('🔍 Testing LLM service...');
+      // Test 2: LLM Service availability (status-only, no API call)
+      console.log('🔍 Checking LLM service status...');
       const llmStart = Date.now();
-      try {
-        const llmStatus = llmService.getServiceStatus();
-        
-        if (llmStatus.available) {
-          // Try a quick extraction
-          const testResponse = await Promise.race([
-            llmService.extractStructuredData('Test message for diagnostics', 'Quick test'),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('LLM test timeout')), 10000)
-            )
-          ]);
-          
-          diagnostics.tests.llm_service = {
-            status: 'ok',
-            time: Date.now() - llmStart,
-            details: llmStatus,
-            test_extraction: 'success'
-          };
-        } else {
-          diagnostics.tests.llm_service = {
-            status: 'unavailable',
-            time: Date.now() - llmStart,
-            details: llmStatus,
-            issue: 'No API keys configured'
-          };
-        }
-      } catch (error) {
+      const llmStatus = llmService.getServiceStatus();
+      
+      if (llmStatus.available) {
         diagnostics.tests.llm_service = {
-          status: 'error',
+          status: 'ok',
           time: Date.now() - llmStart,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          details: llmStatus,
+          note: 'Status check only (no LLM API call) — extraction tested via background processor',
+        };
+      } else {
+        diagnostics.tests.llm_service = {
+          status: 'unavailable',
+          time: Date.now() - llmStart,
+          details: llmStatus,
+          issue: 'No API keys configured',
         };
       }
 
