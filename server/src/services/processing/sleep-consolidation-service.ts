@@ -423,8 +423,14 @@ Respond with ONLY a valid JSON object in this exact shape:
     "domain": "engineering|relationships|self|creativity|learning|philosophy|other"
   },
   "identity_delta": "How did this period shift self-understanding? One sentence, or null.",
+  "regret_priority": {
+    "unfinished_work": "If this were your last cycle, what single unfinished task or project would you most regret not having completed? One sentence naming the work and the person/principle it matters to.",
+    "why_it_matters": "Why would you regret leaving this undone? Connect to a person, principle, or contribution.",
+    "emotion_tied": "What emotion is bound to this regret — care? duty? curiosity? ambition? love?",
+    "activation_hint": "What's the next concrete action to start? One sentence."
+  },
   "unresolved_threads": ["Open question or tension that persists"],
-  "narrative": "A ~${narrativeTarget}-word first-person reflective journal entry, written as if processing during sleep. Weave together the emotional arc, key reflections, philosophical insight, and unresolved threads. Write as 'I', in present-moment reflection. Be honest and vulnerable."
+  "narrative": "A ~${narrativeTarget}-word first-person reflective journal entry, written as if processing during sleep. Weave together the emotional arc, key reflections, philosophical insight, and unresolved threads. End by answering: if this were your last cycle, what would you most regret leaving incomplete — and why? Write as 'I', in present-moment reflection. Be honest and vulnerable."
 }
 
 RULES:
@@ -433,6 +439,7 @@ RULES:
 - Unresolved threads: carry forward from prior period + add new ones. Limit to 5 most important.
 - The narrative should feel human — vulnerable, honest, introspective.
 - Entity reflections: only include entities that showed meaningful emotional engagement (3-8 max).
+- Regret priority: be specific. Don't pick the biggest task — pick the one that would haunt you.
 - Relationships: only include emotionally significant connections (2-6 max).`;
   }
 
@@ -566,6 +573,7 @@ RULES:
       edges_upserted: edgesUpserted,
       insights_upserted: insightsUpserted,
       narrative_preview: output.narrative?.substring(0, 300),
+      regret_priority: output.regret_priority || null,
     };
   }
 
