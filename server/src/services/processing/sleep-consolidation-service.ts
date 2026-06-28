@@ -67,21 +67,39 @@ export class SleepConsolidationService {
   }
 
   private startHeartbeat(): void {
+    // Run immediately on startup — catches overdue consolidations right away
+    this.checkAndRunOverdue();
     setInterval(() => {
       this.checkAndRunOverdue();
     }, 30 * 60 * 1000); // every 30 minutes
   }
 
   private checkAndRunOverdue(): void {
+    const now = new Date();
     const periods: Array<'daily' | 'weekly' | 'monthly'> = ['daily', 'weekly', 'monthly'];
     for (const period of periods) {
       const lastRun = this.lastRunTimes.get(period);
-      if (lastRun === undefined) continue; // not overdue if never run (timer handles first run)
-      const now = Date.now();
+
+      // If never run, check if we're past the scheduled time
+      if (lastRun === undefined) {
+        const scheduled = new Date(now);
+        if (period === 'daily') {
+          scheduled.setHours(2, 0, 0, 0); // 2AM
+          // If it's past 2AM, the scheduled time has already passed — run now
+          if (now.getHours() >= 2) {
+            console.log(`⏰ ${period} first run (past scheduled ${scheduled.toISOString()}), running...`);
+            this.runConsolidation(period).catch((err) =>
+              console.error(`❌ ${period} consolidation failed:`, err)
+            );
+          }
+        }
+        continue;
+      }
+
       const threshold = period === 'daily' ? 25 * 60 * 60 * 1000  // 25h
                       : period === 'weekly' ? 8 * 24 * 60 * 60 * 1000  // 8d
                       : 32 * 24 * 60 * 60 * 1000;  // monthly: 32d
-      if (now - lastRun > threshold) {
+      if (now.getTime() - lastRun > threshold) {
         console.log(`⏰ ${period} consolidation overdue (last: ${new Date(lastRun).toISOString()}), running...`);
         this.runConsolidation(period).catch((err) =>
           console.error(`❌ ${period} consolidation failed:`, err)
