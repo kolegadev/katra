@@ -269,7 +269,7 @@ def initialize_mcp(session: requests.Session, mcp_url: str, api_key: str) -> Opt
     return None
 
 
-def store_session(session: dict, mcp_url: str, api_key: str, user_id: str) -> bool:
+def store_session(session: dict, mcp_url: str, api_key: str, user_id: str, shared_id: str = "") -> bool:
     """Store one session's full transcript as a Katra memory."""
     req_session = requests.Session()
     mcp_sid = initialize_mcp(req_session, mcp_url, api_key)
@@ -305,6 +305,7 @@ def store_session(session: dict, mcp_url: str, api_key: str, user_id: str) -> bo
                             "full-transcript",
                             "auto-collected",
                         ],
+                        **({"shared_id": shared_id} if shared_id else {}),
                     },
                 },
             },
@@ -340,7 +341,7 @@ def find_session_files(sessions_dir: str) -> list[Path]:
 
 
 def process_sessions(sessions_dir: str, state: dict, mcp_url: str, api_key: str,
-                     user_id: str) -> int:
+                     user_id: str, shared_id: str = "") -> int:
     files = find_session_files(sessions_dir)
     stored = 0
 
@@ -362,7 +363,7 @@ def process_sessions(sessions_dir: str, state: dict, mcp_url: str, api_key: str,
                 f"{len(session['transcript'])} chars)"
             )
 
-            if store_session(session, mcp_url, api_key, user_id):
+            if store_session(session, mcp_url, api_key, user_id, shared_id):
                 state["processed_sessions"][sid] = {
                     "checksum": session["checksum"],
                     "file_checksum": session["file_checksum"],
@@ -397,6 +398,7 @@ def main():
                         help="Include assistant thinking blocks in transcript")
     parser.add_argument("--exclude-thinking", action="store_true",
                         help="Exclude assistant thinking blocks from transcript")
+    parser.add_argument("--shared-id", default="", help="Shared ID for communal memory")
     args = parser.parse_args()
 
     if not args.api_key:
@@ -418,7 +420,7 @@ def main():
     while True:
         try:
             stored = process_sessions(
-                args.sessions_dir, state, args.mcp_url, args.api_key, args.user_id
+                args.sessions_dir, state, args.mcp_url, args.api_key, args.user_id, args.shared_id
             )
             total_stored += stored
             save_state(state, args.state_file)
