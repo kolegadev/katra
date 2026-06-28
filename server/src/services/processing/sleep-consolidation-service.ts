@@ -68,19 +68,26 @@ export class SleepConsolidationService {
 
   private startHeartbeat(): void {
     setInterval(() => {
-      for (const [period, lastRun] of this.lastRunTimes) {
-        const now = Date.now();
-        const threshold = period === 'daily' ? 25 * 60 * 60 * 1000  // 25h
-                        : period === 'weekly' ? 8 * 24 * 60 * 60 * 1000  // 8d
-                        : 32 * 24 * 60 * 60 * 1000;  // monthly: 32d
-        if (now - lastRun > threshold) {
-          console.log(`⏰ ${period} consolidation overdue (last: ${new Date(lastRun).toISOString()}), running...`);
-          this.runConsolidation(period).catch((err) =>
-            console.error(`❌ ${period} consolidation failed:`, err)
-          );
-        }
-      }
+      this.checkAndRunOverdue();
     }, 30 * 60 * 1000); // every 30 minutes
+  }
+
+  private checkAndRunOverdue(): void {
+    const periods: Array<'daily' | 'weekly' | 'monthly'> = ['daily', 'weekly', 'monthly'];
+    for (const period of periods) {
+      const lastRun = this.lastRunTimes.get(period);
+      if (lastRun === undefined) continue; // not overdue if never run (timer handles first run)
+      const now = Date.now();
+      const threshold = period === 'daily' ? 25 * 60 * 60 * 1000  // 25h
+                      : period === 'weekly' ? 8 * 24 * 60 * 60 * 1000  // 8d
+                      : 32 * 24 * 60 * 60 * 1000;  // monthly: 32d
+      if (now - lastRun > threshold) {
+        console.log(`⏰ ${period} consolidation overdue (last: ${new Date(lastRun).toISOString()}), running...`);
+        this.runConsolidation(period).catch((err) =>
+          console.error(`❌ ${period} consolidation failed:`, err)
+        );
+      }
+    }
   }
 
   private lastRunTimes: Map<string, number> = new Map();
