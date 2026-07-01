@@ -634,7 +634,7 @@ async function handleGetMemoryDecayStats(args: unknown): Promise<TextContent[]> 
   const service = MemoryDecayService.get_instance();
   const stats = await service.getDecayStats(userId);
   if (stats.length === 0) return [{ type: 'text', text: 'No memory decay data available yet.' }];
-  const lines = stats.map(s => `**${s.memory_type.toUpperCase()}** — ${s.total_memories} total, ${s.active_memories} active, ${s.decaying_memories} decaying, ${s.forgotten_memories} forgotten (avg strength: ${s.average_strength})`);
+  const lines = stats.map(s => `**${(s.memory_type || 'unknown').toUpperCase()}** — ${s.total_memories} total, ${s.active_memories} active, ${s.decaying_memories} decaying, ${s.forgotten_memories} forgotten (avg strength: ${s.average_strength})`);
   return [{ type: 'text', text: `## Memory Decay Statistics\n\n${lines.join('\n\n')}` }];
 }
 
@@ -645,7 +645,7 @@ async function handleGetAnomalyReport(args: unknown): Promise<TextContent[]> {
   const userId = resolveUserId(input.user_id);
   const service = AnomalyDetectionService.get_instance();
   const report = await service.getAnomalyReport(userId);
-  const lines = [`**Total Ingested:** ${report.total_ingested}`, `**Normal:** ${report.normal_count}`, `**Suspect:** ${report.suspect_count}`, `**Anomalous:** ${report.anomalous_count}`, `**Quarantined:** ${report.quarantined_count}`, `**Avg Z-Score:** ${report.average_z_score}`];
+  const lines = [`**Total Ingested:** ${report.total_ingested ?? 0}`, `**Normal:** ${report.normal_count ?? 0}`, `**Suspect:** ${report.suspect_count ?? 0}`, `**Anomalous:** ${report.anomalous_count ?? 0}`, `**Quarantined:** ${report.quarantined_count ?? 0}`, `**Avg Z-Score:** ${report.average_z_score ?? 0}`];
   return [{ type: 'text', text: `## Anomaly Detection Report\n\n${lines.join('\n')}` }];
 }
 
@@ -680,9 +680,10 @@ async function handleGetAttentionReport(): Promise<TextContent[]> {
 async function handleGetDriveState(): Promise<TextContent[]> {
   const engine = MotivationalEngine.get_instance();
   const snapshot = engine.tick();
-  const lines = [`**Dominant Drive:** \`${snapshot.dominant_drive}\``, '', '| Drive | Level | Strength | Trend |', '|-------|-------|----------|-------|'];
+  const dominant = engine.getDominantDrive();
+  const lines = [`**Dominant Drive:** \`${dominant}\``, '', '| Drive | Level | Strength | Trend |', '|-------|-------|----------|-------|'];
   for (const [name, drive] of Object.entries(snapshot.drives)) {
-    lines.push(`| ${name} | ${(drive.current_level * 100).toFixed(0)}% | ${(drive.strength * 100).toFixed(0)}% | ${drive.trend} |`);
+    lines.push(`| ${name} | ${((drive as any).current * 100).toFixed(0)}% | ${(drive.strength * 100).toFixed(0)}% | ${drive.trend} |`);
   }
   return [{ type: 'text', text: `## Homeostatic Drive State\n\n${lines.join('\n')}` }];
 }
@@ -691,7 +692,7 @@ async function handleGetSourceTrust(args: unknown): Promise<TextContent[]> {
   const input = z.object({ source_id: z.string() }).parse(args);
   const engine = MotivationalEngine.get_instance();
   const trust = await engine.getSourceTrust(input.source_id);
-  const lines = [`**Source:** \`${trust.source_id}\``, `**Trust Score:** ${trust.trust_score.toFixed(3)}`, `**Corroborations:** ${trust.corroboration_count}`, `**Contradictions:** ${trust.contradiction_count}`, `**Last Updated:** ${trust.last_updated.toISOString()}`];
+  const lines = [`**Source:** \`${trust.sourceId}\``, `**Trust Score:** ${trust.trustScore.toFixed(3)}`, `**Corroborations:** ${trust.corroborationCount}`, `**Contradictions:** ${trust.contradictionCount}`, `**Last Updated:** ${trust.lastUpdated.toISOString()}`];
   return [{ type: 'text', text: `## Source Trust\n\n${lines.join('\n')}` }];
 }
 
