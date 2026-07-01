@@ -44,7 +44,7 @@ Katra aims to provide a more comprehensive **cognitive memory infrastructure** r
 | **Vestige**               | Cognitive modules + Spaced repetition | Neuroscience-inspired (FSRS, memory states) | **MCP**         | Single Rust binary       | Local cognitive modeling         | More layers + background watchers + full appliance stack |
 | **Letta (MemGPT)**        | Tiered (Core / Recall / Archival) | Agent self-manages memory    | Tools           | Full agent runtime       | Stateful agents that edit their own memory | Katra is a dedicated memory *service*, not a full runtime |
 | **LangGraph / Framework Memory** | Short-term + checkpoints     | Limited                      | Framework-native| Integrated with agent    | Short-term state management      | Persistent long-term + cross-session cognitive layer |
-| **Katra (this project)**  | Episodic + Semantic + KG + Working + Temporal | **Sleep consolidation + reflection** | **MCP** (35 tools) | Full Docker appliance (Mongo + Redis + MinIO) | Long-running agents needing emergent behaviors | — |
+| **Katra (this project)**  | Episodic + Semantic + KG + Working + Temporal | **Sleep consolidation + reflection** | **MCP** (48 tools) | Full Docker appliance (Mongo + Redis + MinIO) | Long-running agents needing emergent behaviors | — |
 
 ### Key Differentiators of Katra
 - **Multi-layered by design** — Not just retrieval, but structured episodic memory, working memory cache, and temporal querying.
@@ -522,6 +522,118 @@ DocumentDB, ElastiCache Redis, S3, and ALB. See [Deployment Guide](docs/DEPLOYME
 Helm chart included in `helm/katra/` — supports Bitnami MongoDB + Redis subcharts,
 ingress with path routing, HPA, and PDB. See [Deployment Guide](docs/DEPLOYMENT.md).
 
+## Maintenance & Operations
+
+### Rebuilding after code changes
+
+Katra bakes the TypeScript source into the Docker image at build time — there
+are no live volume mounts for server code. After pulling or making code changes:
+
+```bash
+cd Katra-Agentic-Memory
+git pull origin main
+docker-compose build server
+docker-compose up -d server
+```
+
+Wait ~15 seconds for the embedding model to lazy-load, then verify:
+
+```bash
+curl http://localhost:9012/api/v1/health
+# {"status":"ok","services":{"mongodb":"connected","redis":"connected","llm":"deepseek","embeddings":"available"}}
+```
+
+### Colima users (macOS without Docker Desktop)
+
+Colima runs a Docker-compatible daemon inside a Lima VM. The Docker socket and
+CLI are at non-standard paths:
+
+```bash
+# One-time: add to your shell profile
+export DOCKER_HOST="unix://$HOME/.colima/docker.sock"
+export PATH="$HOME/homebrew/bin:$PATH"
+
+# Verify
+docker ps
+docker-compose version
+```
+
+If `colima` itself has stopped (after reboot, etc.):
+
+```bash
+colima start --cpu 4 --memory 12 --disk 100
+```
+
+Katra data persists in the Colima VM across restarts.
+
+### Verifying MCP tools after rebuild
+
+The MCP endpoint uses StreamableHTTP — initialize a session first, then query:
+
+```bash
+# Step 1: Initialize and capture session ID
+curl -sf -X POST http://localhost:3112/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "x-mcp-auth: YOUR_MCP_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' \
+  -D /tmp/katra-headers.txt -o /dev/null
+
+SID=$(grep mcp-session-id /tmp/katra-headers.txt | cut -d' ' -f2 | tr -d '\r')
+
+# Step 2: List tools
+curl -sf -X POST http://localhost:3112/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "x-mcp-auth: YOUR_MCP_API_KEY" \
+  -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+The `data:` SSE lines in the response contain the JSON-RPC result. Parse with
+`grep 'data: ' | sed 's/^data: //' | python3 -m json.tool`.
+
+### Background extractors (macOS launchctl)
+
+Three passive session-log extractors run as launchd agents, continuously pushing
+agent conversation history into Katra:
+
+```bash
+# Check status
+launchctl list | grep com.katra
+
+# Restart all
+launchctl kickstart gui/$(id -u)/com.katra.kolega-code-extractor
+launchctl kickstart gui/$(id -u)/com.katra.claude-history-extractor
+launchctl kickstart gui/$(id -u)/com.katra.agent-executor-opencode
+
+# Tail logs
+tail -f ~/.katra/kolega-code-extractor.log
+tail -f ~/.katra/claude-history-extractor.log
+```
+
+Plist files live in `~/Library/LaunchAgents/`:
+- `com.katra.kolega-code-extractor.plist`
+- `com.katra.claude-history-extractor.plist`
+- `com.katra.agent-executor.plist`
+- `com.katra.agent-executor-opencode.plist`
+- `com.katra.adaptive-heartbeat.plist`
+
+### Viewing server logs
+
+```bash
+docker logs katra-server --tail 50 -f
+```
+
+### Pushing changes upstream
+
+```bash
+git add -A
+git commit -m "description"
+git pull --rebase origin main
+git push origin main
+```
+
 ## How It Compares
 
 | Feature | Katra | Mem0 | Zep | Pinecone |
@@ -539,7 +651,7 @@ ingress with path routing, HPA, and PDB. See [Deployment Guide](docs/DEPLOYMENT.
 
 - [Quick Start Guide](docs/QUICKSTART.md) — 5-minute setup
 - [Architecture](docs/ARCHITECTURE.md) — How it works under the hood
-- [MCP Tools Reference](docs/MCP-TOOLS.md) — All 35 tools with examples
+- [MCP Tools Reference](docs/MCP-TOOLS.md) — All 48 tools with examples
 - [Autonomous Loop](docs/AUTONOMOUS-LOOP.md) — Salience-driven agent autonomy — installation, architecture, verification
 - [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md) — Reflective memory distillation — principles, architecture, and usage
 - [Security Policy](docs/SECURITY.md) — Security architecture, audit findings, vulnerability reporting
