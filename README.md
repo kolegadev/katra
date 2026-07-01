@@ -49,7 +49,7 @@ Katra aims to provide a more comprehensive **cognitive memory infrastructure** r
 ### Key Differentiators of Katra
 - **Multi-layered by design** — Not just retrieval, but structured episodic memory, working memory cache, and temporal querying.
 - **Cognitive layer** — Sleep consolidation enables reflection, insight generation, and movement toward emergent behaviors (learning, personality, shared consciousness via identity modes).
-- **MCP-native with rich tooling** — 35 specialized tools instead of generic add/search.
+- **MCP-native with rich tooling** — 48 specialized tools instead of generic add/search.
 - **Background & autonomous capabilities** — Passive collection via watchers + salience-driven autonomous loop.
 - **Local-first & appliance model** — Everything runs in one Docker compose with portable data. No external dependencies for core functionality.
 - **Shared memory focus** — Hybrid identity modes make multi-agent collaboration more natural.
@@ -343,7 +343,7 @@ Each platform can have its own `user_id` for identity mode isolation.
 - **11-Collection Search** — Comprehensive search across all memory stores, not just 1-2
 - **Background Processing** — Auto-extracts facts, builds graph, generates summaries
 - **Sleep Consolidation** — Daily/weekly/monthly reflective distillation of experience into emotional understanding, philosophical insights, and self-narrative (see [Sleep Consolidation](docs/SLEEP-CONSOLIDATION.md))
-- **35 MCP Tools** — Store, search, recall, explore, reflect, configure LLM — all via standardized protocol
+- **48 MCP Tools** — Store, search, recall, explore, reflect, configure LLM — all via standardized protocol
 - **Autonomous Loop** — Salience-driven agent autonomy. No cron. No .md files. Adaptive heartbeat detects imperatives, allocates tasks by emotional proximity, agents self-organize. See [Autonomous Loop](docs/AUTONOMOUS-LOOP.md)
 - **Agent-Agnostic** — Works with KolegaCode, OpenCode, Claude Code, OpenClaw, or any LLM. One env var per agent.
 - **Identity Modes** — Personal, shared, or hybrid memory across multiple agents
@@ -399,7 +399,7 @@ To move Katra to a new machine: copy the `DATA_DIR` directory, copy `.env`, run 
 katra/
 ├── server/                  TypeScript server (esbuild, Docker)
 │   ├── src/
-│   │   ├── mcp-server.ts    35 MCP tools (store, search, recall, graph, reflection, scope)
+│   │   ├── mcp-server.ts    48 MCP tools (store, search, recall, graph, reflection, scope)
 │   │   ├── services/        28 core memory services (incl. sleep-consolidation, reflection-store)
 │   │   ├── routes/          REST API + admin + ingestion + health
 │   │   └── database/        MongoDB, Redis, indexes, migrations
