@@ -242,6 +242,35 @@ extraction, and summaries. **Three ways to configure — no `.env` editing requi
 
 Supported providers: DeepSeek, OpenAI, Moonshot, Ollama, Custom (any OpenAI-compatible).
 
+### 💰 Reduce Inference Costs — Run Models Locally
+
+If you want more frequent semantic distillation, auto-journaling, and reflection
+without API bills, you can run open-source models locally via Ollama. With 32GB
+RAM, you have plenty of headroom. All models below run on CPU (no GPU needed),
+and work as drop-in replacements via Ollama's OpenAI-compatible API.
+
+**Recommended models for local inference on 32GB RAM:**
+
+| Model | RAM (Q4) | Best for |
+|---|---|---|
+| **Qwen 2.5 14B** | ~9 GB | Highest quality — best for serious distillation pipelines |
+| **Qwen 2.5 7B** | ~4.5 GB | Sweet spot — excellent quality, fast, leaves RAM for other services |
+| **Mistral 7B** | ~4.5 GB | Solid all-rounder for classification and structured extraction |
+| **Phi-4 14B** | ~8.5 GB | Microsoft — punches above weight on reasoning tasks |
+| **Gemma 3 12B** | ~7 GB | Google — strong at following templates/schemas |
+| **Llama 3.2 3B** | ~2.5 GB | Smallest/fastest — good enough for basic extraction, runs on anything |
+
+**Setup:**
+```bash
+ollama pull qwen2.5:7b          # or llama3.2:3b, mistral, phi4:14b, etc.
+# Then configure Katra via dashboard or MCP:
+# Provider: Ollama, Base URL: http://localhost:11434, Model: qwen2.5:7b
+```
+
+The local embedding model (Xenova/all-MiniLM-L6-v2, ~80MB) is already free and
+local — no API key needed. Pairing it with a local LLM gives you a fully
+offline, zero-cost Katra deployment.
+
 ## Embeddings
 
 Embeddings are **always local** — no API key, no external service, no cost.
