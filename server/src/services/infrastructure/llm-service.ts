@@ -509,6 +509,7 @@ CRITICAL RULES:
       if (finishReason === 'length') {
         console.warn(`⚠️ DeepSeek response truncated by token limit — ${content.length} chars`);
       }
+      this._trackCacheStats(response);
       return content;
     } catch (error: any) {
       if (error?.status === 401 || error?.status === 403) {
@@ -546,6 +547,7 @@ CRITICAL RULES:
         const response = await client.chat.completions.create(
           params as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
         );
+        this._trackCacheStats(response);
         const msg = response.choices[0]?.message as any;
         const content = msg?.content || msg?.reasoning_content || '{}';
         return JSON.parse(content);
@@ -555,6 +557,7 @@ CRITICAL RULES:
           const response = await client.chat.completions.create(
             params as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
           );
+          this._trackCacheStats(response);
           const msg = response.choices[0]?.message as any;
           const content = msg?.content || msg?.reasoning_content || '{}';
           const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || content.match(/(\{[\s\S]*\})/);

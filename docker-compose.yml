@@ -77,6 +77,8 @@ services:
       - "${HOST_API_PORT:-9012}:9002"   # Admin REST API
     env_file:
       - .env
+    environment:
+      - KATRA_DISABLE_BACKGROUND_PROCESSOR=${KATRA_DISABLE_BACKGROUND_PROCESSOR:-false}
     depends_on:
       mongo:
         condition: service_healthy

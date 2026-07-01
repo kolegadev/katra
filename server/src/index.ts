@@ -99,9 +99,13 @@ async function main() {
     console.log('  Embeddings: ⚠️ unavailable (keyword search only)');
   }
 
-  // Start background processor
+  // Start background processor (can be disabled via env var)
   const bgProcessor = BackgroundProcessor.get_instance();
-  bgProcessor.start(30000); // 30 second interval
+  if (process.env.KATRA_DISABLE_BACKGROUND_PROCESSOR === 'true') {
+    console.log('⏸️ Background processor disabled via KATRA_DISABLE_BACKGROUND_PROCESSOR=true');
+  } else {
+    bgProcessor.start(30000); // 30 second interval
+  }
 
   // Start sleep consolidation service
   const sleepService = SleepConsolidationService.get_instance();
