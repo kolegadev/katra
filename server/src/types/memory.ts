@@ -15,6 +15,12 @@ export interface EpisodicEvent {
   embedding?: number[];
   embedding_model?: string;
   embedding_version?: number;
+  retrieval_strength?: number;
+  decay_exponent?: number;
+  last_accessed_at?: Date;
+  access_count?: number;
+  anomaly_z_score?: number;
+  anomaly_classification?: string;
 }
 
 export interface SessionStats {
@@ -43,6 +49,10 @@ export interface KnowledgeRelationship {
   properties?: Record<string, any>;
   strength?: number;
   created_at: Date;
+  retrieval_strength?: number;
+  decay_exponent?: number;
+  last_accessed_at?: Date;
+  access_count?: number;
 }
 
 // Working Memory Types
@@ -65,6 +75,12 @@ export interface SemanticFact {
   embedding?: number[];
   embedding_model?: string;
   embedding_version?: number;
+  retrieval_strength?: number;
+  decay_exponent?: number;
+  last_accessed_at?: Date;
+  access_count?: number;
+  anomaly_z_score?: number;
+  anomaly_classification?: string;
 }
 
 // Asset Storage Types
@@ -196,6 +212,10 @@ export interface PhilosophicalInsight {
   contradictory_evidence?: string[];
   status: 'emerging' | 'strengthening' | 'stable' | 'challenged';
   created_at: Date;
+  retrieval_strength?: number;
+  decay_exponent?: number;
+  last_accessed_at?: Date;
+  access_count?: number;
 }
 
 export interface GatheredData {
@@ -256,4 +276,71 @@ export interface ConsolidationResult {
   insights_upserted: number;
   narrative_preview?: string;
   error?: string;
+}
+
+// ── Memory Decay Types ──────────────────────────────────────────
+
+export interface DecayConfig {
+  memoryType: string;
+  decayExponent: number;
+  initialStrength: number;
+}
+
+export const DEFAULT_DECAY_CONFIGS: Record<string, DecayConfig> = {
+  episodic:  { memoryType: 'episodic',  decayExponent: 0.5,  initialStrength: 1.0 },
+  semantic:  { memoryType: 'semantic',  decayExponent: 0.15, initialStrength: 1.0 },
+  emotional: { memoryType: 'emotional', decayExponent: 0.3,  initialStrength: 1.0 },
+  knowledge: { memoryType: 'knowledge', decayExponent: 0.1,  initialStrength: 1.0 },
+  insights:  { memoryType: 'insights',  decayExponent: 0.05, initialStrength: 1.0 },
+};
+
+export const SPACED_REPETITION_INTERVALS_DAYS = [1, 3, 7, 21, 90];
+
+export const DEFAULT_REINFORCEMENT_FACTOR = 0.95;
+
+export interface DecayStats {
+  memoryType: string;
+  totalMemories: number;
+  averageStrength: number;
+  minStrength: number;
+  maxStrength: number;
+  decayedCount: number;
+  reinforcedCount: number;
+}
+
+// ── Anomaly Detection Types ─────────────────────────────────────
+
+export type AnomalyClassification = 'NORMAL' | 'SUSPECT' | 'ANOMALOUS';
+
+export interface AnomalyRecord {
+  memory_id: string;
+  memory_type: string;
+  z_score: number;
+  classification: AnomalyClassification;
+  confidence: number;
+  adjusted_confidence: number;
+  detected_at: Date;
+  quarantined: boolean;
+}
+
+export interface QuarantinedMemory {
+  memory_id: string;
+  memory_type: string;
+  z_score: number;
+  content_preview: string;
+  quarantined_at: Date;
+  auto_rehabilitate: boolean;
+}
+
+export interface AnomalyReport {
+  total_ingested: number;
+  normal_count: number;
+  suspect_count: number;
+  anomalous_count: number;
+  quarantine_count: number;
+  recent_anomalies: Array<{
+    memory_id: string;
+    z_score: number;
+    classification: AnomalyClassification;
+  }>;
 }

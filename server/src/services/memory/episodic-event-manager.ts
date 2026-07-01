@@ -289,6 +289,9 @@ export class EpisodicEventManager {
         cascade_depth: 0,
         processing_version: 1,
         duplicate_prevention_applied: ['enhanced_content_hash', 'cascade_detection'],
+        retrieval_strength: 1.0,
+        decay_exponent: 0.5,
+        last_accessed_at: new Date(),
         ...(eventData.metadata ? sanitizeCallerMetadata(eventData.metadata) : {})
       },
       processing_lineage: {

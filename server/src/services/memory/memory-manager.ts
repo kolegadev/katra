@@ -6,6 +6,7 @@
 import { get_database } from '../../database/connection.js';
 import { ObjectId } from 'mongodb';
 import { generateContentHash, generateIdempotencyKey, stableContentHash } from '../infrastructure/content-hash-utils.js';
+import { MemoryDecayService } from '../processing/memory-decay-service.js';
 import type { 
   EpisodicEvent, 
   KnowledgeNode, 
@@ -127,6 +128,25 @@ export class MemoryManager {
     if (user_id) filter.user_id = user_id;
     const event = await db.collection('episodic_events')
       .findOne(filter);
+
+    if (event) {
+      const decayService = MemoryDecayService.get_instance();
+      const accessCount = (event.metadata?.access_count || 0) + 1;
+      const boost = decayService.boostOnRecall('episodic', event.metadata?.retrieval_strength || 0, accessCount - 1);
+
+      await db.collection('episodic_events').updateOne(
+        { id: event_id },
+        {
+          $set: {
+            'metadata.retrieval_strength': boost.newStrength,
+            'metadata.decay_exponent': boost.newDecayExponent,
+            'metadata.last_accessed_at': new Date(),
+            'metadata.access_count': accessCount,
+          },
+        }
+      );
+    }
+
     return event as any as EpisodicEvent | null;
   }
 
@@ -289,7 +309,34 @@ export class MemoryManager {
       .sort({ score: { $meta: 'textScore' } })
       .limit(limit)
       .toArray();
-    
+
+    if (result.length > 0) {
+      const decayService = MemoryDecayService.get_instance();
+      const bulkOps = result.map((doc: any) => {
+        const accessCount = (doc.access_count || 0) + 1;
+        const boost = decayService.boostOnRecall('semantic', doc.retrieval_strength || 0, accessCount - 1);
+        return {
+          updateOne: {
+            filter: { _id: doc._id },
+            update: {
+              $set: {
+                retrieval_strength: boost.newStrength,
+                decay_exponent: boost.newDecayExponent,
+                last_accessed_at: new Date(),
+                access_count: accessCount,
+              },
+            },
+          },
+        };
+      });
+
+      try {
+        await db.collection('semantic_facts').bulkWrite(bulkOps, { ordered: false });
+      } catch {
+        // Individual failures are non-fatal — results still returned
+      }
+    }
+
     return result as any as SemanticFact[];
   }
 

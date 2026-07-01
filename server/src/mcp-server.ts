@@ -49,6 +49,7 @@ import { stableContentHash } from './services/infrastructure/content-hash-utils.
 import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured, validateKatraKey, isKatraAuthConfigured } from './utils/api-key-manager.js';
 import { ReflectionStore } from './services/infrastructure/reflection-store.js';
 import { SleepConsolidationService } from './services/processing/sleep-consolidation-service.js';
+import { SelfModelService } from './services/processing/self-model-service.js';
 
 dotenv.config();
 
@@ -535,7 +536,143 @@ const tools = [
       user_id: z.string().optional(),
     })) as Record<string, unknown>,
   },
+  // ── Self Model ──────────────────────────────────────────────
+  {
+    name: 'get_identity_kernel',
+    description: 'Get the agent\'s identity kernel — "I am the kind of agent who..." narrative derived from stable philosophical insights. Returns a narrative and top 5 insights sorted by confidence.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_mind_wander',
+    description: 'Perform a mind-wandering random walk on the knowledge graph. Starts at a random node and follows edges weighted by relationship strength. Returns the traversal path, an associative narrative, and stores the result as a low-salience episodic event.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_agent_beliefs',
+    description: 'Retrieve the agent\'s Theory of Mind beliefs about a specific entity — what propositions the agent believes about that entity, along with confidence and source.',
+    inputSchema: zodToJsonSchema(z.object({
+      entity_name: z.string().describe('The entity name to retrieve beliefs for'),
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_procedural_templates',
+    description: 'Get cached procedural memory templates — tool-call patterns that have been observed frequently enough (>= 5 occurrences) to be considered habitual. Shows tool name, input shape, frequency, and average success rate.',
+    inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
+  },
 ];
+
+// ── Self Model handlers ──────────────────────────────────────────
+
+async function handleGetIdentityKernel(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    user_id: z.string().optional(),
+  }).parse(args);
+  const userId = resolveUserId(input.user_id);
+
+  const service = SelfModelService.get_instance();
+  const kernel = await service.getIdentityKernel(userId);
+
+  const lines: string[] = [
+    '## Identity Kernel',
+    '',
+    `**Narrative:** ${kernel.narrative}`,
+    '',
+  ];
+
+  if (kernel.insights.length > 0) {
+    lines.push('### Top Insights', '');
+    for (let i = 0; i < kernel.insights.length; i++) {
+      const ins = kernel.insights[i];
+      lines.push(`${i + 1}. **${ins.domain}** (${(ins.confidence * 100).toFixed(0)}% confidence, ${ins.status})`);
+      lines.push(`   ${ins.insight_text}`);
+      lines.push('');
+    }
+  } else {
+    lines.push('*No stable or strengthening insights found.*');
+  }
+
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+async function handleGetMindWander(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    user_id: z.string().optional(),
+  }).parse(args);
+  const userId = resolveUserId(input.user_id);
+
+  const service = SelfModelService.get_instance();
+  const wander = await service.generateMindWander(userId);
+
+  const lines: string[] = [
+    '## Mind Wander',
+    '',
+    `**Narrative:** ${wander.narrative}`,
+  ];
+
+  if (wander.path.length > 0) {
+    lines.push('', '**Path:** ' + wander.path.join(' → '));
+  }
+
+  if (wander.stored_event_id) {
+    lines.push('', `**Stored as episodic event:** \`${wander.stored_event_id}\``);
+  }
+
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+async function handleGetAgentBeliefs(args: unknown): Promise<TextContent[]> {
+  const input = z.object({
+    entity_name: z.string(),
+    user_id: z.string().optional(),
+  }).parse(args);
+
+  const service = SelfModelService.get_instance();
+  const beliefs = await service.getAgentBeliefs(input.entity_name);
+
+  const lines: string[] = [
+    `## Agent Beliefs — ${input.entity_name}`,
+    '',
+  ];
+
+  if (beliefs.length === 0) {
+    lines.push('*No beliefs recorded for this entity.*');
+  } else {
+    lines.push('| Proposition | Confidence | Source | Last Updated |');
+    lines.push('|-------------|------------|--------|--------------|');
+    for (const b of beliefs) {
+      lines.push(`| ${b.proposition} | ${(b.confidence * 100).toFixed(0)}% | ${b.source} | ${b.last_updated.toISOString()} |`);
+    }
+  }
+
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+async function handleGetProceduralTemplates(_args: unknown): Promise<TextContent[]> {
+  const service = SelfModelService.get_instance();
+  const templates = service.getProceduralTemplates();
+
+  const lines: string[] = [
+    '## Procedural Templates',
+    '',
+  ];
+
+  if (templates.length === 0) {
+    lines.push('*No procedural templates cached yet (threshold: 5 occurrences).*');
+  } else {
+    lines.push('| Tool Name | Input Shape | Frequency | Avg Success |');
+    lines.push('|-----------|-------------|-----------|-------------|');
+    for (const t of templates) {
+      lines.push(`| ${t.toolName} | ${t.inputShape} | ${t.frequency} | ${(t.avgSuccess * 100).toFixed(0)}% |`);
+    }
+  }
+
+  return [{ type: 'text', text: lines.join('\n') }];
+}
 
 // ── Tool handlers ──────────────────────────────────────────────────
 
@@ -1993,6 +2130,10 @@ function registerHandlers(server: Server) {
         case 'get_unresolved_threads': result = await handleGetUnresolvedThreads(args); break;
         case 'get_reflection_arc': result = await handleGetReflectionArc(args); break;
         case 'trigger_reflection': result = await handleTriggerReflection(args); break;
+        case 'get_identity_kernel': result = await handleGetIdentityKernel(args); break;
+        case 'get_mind_wander': result = await handleGetMindWander(args); break;
+        case 'get_agent_beliefs': result = await handleGetAgentBeliefs(args); break;
+        case 'get_procedural_templates': result = await handleGetProceduralTemplates(args); break;
         default: throw new Error(`Unknown tool: ${name}`);
       }
       return { content: result, isError: false };
