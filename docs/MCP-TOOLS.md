@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-Katra exposes **35 tools** via the Model Context Protocol (MCP). All tools are accessible through the MCP endpoint at `http://localhost:3112/mcp`.
+Katra exposes **48 tools** via the Model Context Protocol (MCP). All tools are accessible through the MCP endpoint at `http://localhost:3112/mcp`.
 
 ## Authentication
 
@@ -434,3 +434,102 @@ List uploaded assets stored in MinIO/S3.
 | user_id | string | No | — |
 | content_type | string | No | — |
 | limit | number | No | 20 |
+
+---
+
+## Cognitive Architecture
+
+### get_memory_decay_stats
+
+Returns per-type memory decay statistics: total, active, decaying, forgotten counts, average strength, and half-life remaining for each memory type.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| user_id | string | No | — |
+
+### get_anomaly_report
+
+Returns anomaly detection report: total ingested count, breakdown by normal/suspect/anomalous/quarantined, average z-score, and list of recent anomalies.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| user_id | string | No | — |
+
+### get_quarantined_memories
+
+Lists quarantined memories with metadata: z-score, type, corroboration count, and quarantine date.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| user_id | string | No | — |
+
+### get_salience_state
+
+Returns current meta-state (exploration/task_execution/reflection/alert/idle), attention threshold, average salience score, and score distribution.
+
+Takes no arguments.
+
+### get_attention_report
+
+Comprehensive attention report: processing distribution by salience tier (high/medium/low counts), current threshold, and active goals.
+
+Takes no arguments.
+
+### get_drive_state
+
+Returns the 4 homeostatic drives (coherence, novelty, connection, growth) with current level, strength, trend, and the dominant drive.
+
+Takes no arguments.
+
+### get_source_trust
+
+Returns trust metrics for a source: trust score, corroboration count, contradiction count, and last updated timestamp.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| source_id | string | Yes | — |
+
+### get_error_report
+
+Returns ACC error monitor: prediction accuracy, average TD error, surprise rate, conflict count, and recent errors tracked.
+
+Takes no arguments.
+
+### get_action_policy
+
+Returns learned Q-values and softmax selection probabilities for each available action in the given state.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| state_key | string | Yes | — |
+
+### get_identity_kernel
+
+Returns the "I am the kind of agent who..." narrative distilled from stable philosophical insights, plus the top 5 supporting insights.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| user_id | string | No | — |
+
+### get_mind_wander
+
+Performs a random walk on the knowledge graph, returns the traversal path and associative narrative, and stores the result as a low-salience event.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| user_id | string | No | — |
+
+### get_agent_beliefs
+
+Returns Theory of Mind beliefs about a named entity: proposition, confidence, source, and last updated timestamp.
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| entity_name | string | Yes | — |
+| user_id | string | No | — |
+
+### get_procedural_templates
+
+Returns cached tool-call patterns that have been observed 5+ times: tool name, input shape, frequency, and average success rate.
+
+Takes no arguments.

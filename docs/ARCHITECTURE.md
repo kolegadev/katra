@@ -36,7 +36,7 @@ These services form the irreducible memory system:
 
 #### MCP Server
 
-`mcp-server.ts` — the 35-tool MCP server. This is the primary client interface.
+`mcp-server.ts` — the 48-tool MCP server. This is the primary client interface.
 
 #### Database Layer
 
@@ -134,7 +134,7 @@ The core data model is unchanged from the proven cognitive-memory-chat implement
 - `working_memory` (Redis) — Ephemeral session-scoped key-value state
 - `assets` (S3) — Uploaded files with metadata in MongoDB
 
-### MCP Tools (35, expandable)
+### MCP Tools (48, expandable)
 
 **Memory Storage:**
 - `store_memory` — Store a fact, preference, insight, or event

@@ -133,7 +133,7 @@ Add Katra to your agent's MCP config:
 }
 ```
 
-Restart your agent. It now has 35 memory tools available.
+Restart your agent. It now has 48 memory tools available.
 
 ## 7. Run the Test Suite
 
@@ -236,7 +236,7 @@ On macOS, use `launchctl` / `~/Library/LaunchAgents` instead of systemd (see
 
 ## Next Steps
 
-- [MCP Tools Reference](MCP-TOOLS.md) — All 35 tools with examples
+- [MCP Tools Reference](MCP-TOOLS.md) — All 48 tools with examples
 - [REST API Reference](API-REFERENCE.md) — HTTP endpoints
 - [Security Policy](SECURITY.md) — Security architecture and vulnerability reporting
 - [Configuration Guide](CONFIGURATION.md) — All environment variables

@@ -2,7 +2,7 @@
 
 > **Last updated:** 2026-06-24
 > **Katra version:** 3.0.0
-> **Key features:** 35 MCP tools, sleep consolidation, security hardening, test suite (87 tests)
+> **Key features:** 48 MCP tools, sleep consolidation, security hardening, test suite (87 tests)
 
 ## Architecture Overview
 
@@ -276,7 +276,7 @@ cd server && npm test
 
 ## Related Documentation
 
-- [MCP Tools Reference](MCP-TOOLS.md) — All 35 MCP tools
+- [MCP Tools Reference](MCP-TOOLS.md) — All 48 MCP tools
 - [REST API Reference](API-REFERENCE.md) — HTTP endpoints
 - [Security Policy](SECURITY.md) — Key lifecycle, input validation, auth architecture
 - [Sleep Consolidation](SLEEP-CONSOLIDATION.md) — Reflective memory distillation

@@ -5,7 +5,7 @@ This guide covers migrating from [cognitive-memory-chat](https://github.com/kole
 ## What's the Same
 
 - **Core engine** — Same 33 memory services (episodic, semantic, knowledge graph, working memory, embeddings, background processor, sleep consolidation, etc.)
-- **MCP tools** — All 35 MCP tools work identically
+- **MCP tools** — All 48 MCP tools work identically
 - **REST API** — Same route structure under `/api/v1/`
 - **Database** — Same MongoDB collections and index structure
 - **Redis** — Same working memory and caching patterns
