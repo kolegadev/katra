@@ -111,48 +111,79 @@ export class SleepConsolidationService {
   private lastRunTimes: Map<string, number> = new Map();
 
   private schedulePeriod(key: string, hour: number, minute: number): void {
-    const ms = this.msUntil(hour, minute);
+    const MAX_DELAY = 2147483647;
+    const ms = Math.min(this.msUntil(hour, minute), MAX_DELAY);
     console.log(`   ⏰ Next ${key} in ${Math.round(ms / 60000)} minutes (${new Date(Date.now() + ms).toISOString()})`);
     const timer = setTimeout(() => {
       this.runConsolidation(key as 'daily').catch((err) =>
         console.error(`❌ ${key} consolidation failed:`, err)
       );
-      // Reschedule for next day
-      this.timers.set(key, setInterval(() => {
-        this.runConsolidation(key as 'daily').catch((err) =>
-          console.error(`❌ ${key} consolidation failed:`, err)
-        );
-      }, 24 * 60 * 60 * 1000));
+      const reschedule = () => {
+        let next = 24 * 60 * 60 * 1000; // 24h — fits in 32-bit
+        if (next > MAX_DELAY) next = MAX_DELAY;
+        this.timers.set(key, setTimeout(() => {
+          this.runConsolidation(key as 'daily').catch((err) =>
+            console.error(`❌ ${key} consolidation failed:`, err)
+          );
+          reschedule();
+        }, next));
+      };
+      reschedule();
     }, ms);
     this.timers.set(key + '_initial', timer);
   }
 
   private scheduleWeekly(key: string, dayOfWeek: number, hour: number, minute: number): void {
-    const ms = this.msUntilNextDayOfWeek(dayOfWeek, hour, minute);
+    const MAX_DELAY = 2147483647;
+    const ms = Math.min(this.msUntilNextDayOfWeek(dayOfWeek, hour, minute), MAX_DELAY);
     const timer = setTimeout(() => {
       this.runConsolidation('weekly').catch((err) =>
         console.error(`❌ ${key} consolidation failed:`, err)
       );
-      this.timers.set(key, setInterval(() => {
-        this.runConsolidation('weekly').catch((err) =>
-          console.error(`❌ ${key} consolidation failed:`, err)
-        );
-      }, 7 * 24 * 60 * 60 * 1000));
+      const reschedule = () => {
+        let next = this.msUntilNextDayOfWeek(dayOfWeek, hour, minute);
+        if (next > MAX_DELAY) next = MAX_DELAY;
+        this.timers.set(key, setTimeout(() => {
+          this.runConsolidation('weekly').catch((err) =>
+            console.error(`❌ ${key} consolidation failed:`, err)
+          );
+          reschedule();
+        }, next));
+      };
+      reschedule();
     }, ms);
     this.timers.set(key + '_initial', timer);
   }
 
   private scheduleMonthly(key: string, dayOfMonth: number, hour: number, minute: number): void {
-    const ms = this.msUntilNextMonthDay(dayOfMonth, hour, minute);
+    const MAX_DELAY = 2147483647; // 2^31 - 1, Node.js setTimeout max
+    const rawMs = this.msUntilNextMonthDay(dayOfMonth, hour, minute);
+    const ms = Math.min(rawMs, MAX_DELAY);
     const timer = setTimeout(() => {
+      // If we capped the initial delay, check if we're actually at the scheduled time
+      if (rawMs > MAX_DELAY) {
+        // Still not time yet — reschedule
+        this.timers.set(key + '_initial', setTimeout(() => {
+          this.scheduleMonthly(key, dayOfMonth, hour, minute);
+        }, MAX_DELAY));
+        return;
+      }
       this.runConsolidation('monthly').catch((err) =>
         console.error(`❌ ${key} consolidation failed:`, err)
       );
-      this.timers.set(key, setInterval(() => {
-        this.runConsolidation('monthly').catch((err) =>
-          console.error(`❌ ${key} consolidation failed:`, err)
-        );
-      }, 30 * 24 * 60 * 60 * 1000));
+      // Recursive setTimeout with 32-bit safe delay cap
+      const reschedule = () => {
+        let next = this.msUntilNextMonthDay(dayOfMonth, hour, minute);
+        if (next > MAX_DELAY) next = MAX_DELAY;
+        console.log(`   ⏰ Next ${key} in ${Math.round(next / 60000)} minutes`);
+        this.timers.set(key, setTimeout(() => {
+          this.runConsolidation('monthly').catch((err) =>
+            console.error(`❌ ${key} consolidation failed:`, err)
+          );
+          reschedule();
+        }, next));
+      };
+      reschedule();
     }, ms);
     this.timers.set(key + '_initial', timer);
   }
@@ -190,6 +221,16 @@ export class SleepConsolidationService {
     period: 'daily' | 'weekly' | 'monthly',
     userId: string = DEFAULT_USER_ID
   ): Promise<ConsolidationResult> {
+    if (this.processing) {
+      console.log(`⏭️ ${period} consolidation skipped — already in progress`);
+      return {
+        success: false,
+        period_type: period,
+        period_start: new Date(),
+        period_end: new Date(),
+        error: 'Consolidation already in progress',
+      };
+    }
     this.processing = true;
     const startTime = Date.now();
     
