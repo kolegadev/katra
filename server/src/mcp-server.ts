@@ -49,6 +49,11 @@ import { stableContentHash } from './services/infrastructure/content-hash-utils.
 import { ensureApiKeys, logGeneratedKeys, validateMcpKey, isMcpAuthConfigured, validateKatraKey, isKatraAuthConfigured } from './utils/api-key-manager.js';
 import { ReflectionStore } from './services/infrastructure/reflection-store.js';
 import { SleepConsolidationService } from './services/processing/sleep-consolidation-service.js';
+import { MemoryDecayService } from './services/processing/memory-decay-service.js';
+import { AnomalyDetectionService } from './services/processing/anomaly-detection-service.js';
+import { SalienceService } from './services/processing/salience-service.js';
+import { MotivationalEngine } from './services/processing/motivational-engine.js';
+import { DecisionActionService } from './services/processing/decision-action-service.js';
 import { SelfModelService } from './services/processing/self-model-service.js';
 
 dotenv.config();
@@ -564,7 +569,149 @@ const tools = [
     description: 'Get cached procedural memory templates — tool-call patterns that have been observed frequently enough (>= 5 occurrences) to be considered habitual. Shows tool name, input shape, frequency, and average success rate.',
     inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
   },
+  {
+    name: 'get_memory_decay_stats',
+    description: 'Get memory decay statistics across all memory types — how many memories are active, decaying, or forgotten, with average retrieval strength per type.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_anomaly_report',
+    description: 'Get anomaly detection report — counts of normal, suspect, and anomalous memories ingested, quarantined count, and recent anomaly records.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_quarantined_memories',
+    description: 'List all currently quarantined memories — memories classified as anomalous at ingestion, excluded from retrieval and reflection until corroborated.',
+    inputSchema: zodToJsonSchema(z.object({
+      user_id: z.string().optional(),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_salience_state',
+    description: 'Get the current attention/salience state — meta-state (exploration/task_execution/reflection/alert/idle), active weights, arousal level, and recent salience score distribution.',
+    inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
+  },
+  {
+    name: 'get_attention_report',
+    description: 'Get a comprehensive attention report — how many memories received high/medium/low salience, average scores, current meta-state, and active goals.',
+    inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
+  },
+  {
+    name: 'get_drive_state',
+    description: 'Get the current homeostatic drive state — coherence, novelty, connection, and growth drive levels, strengths, and the dominant drive.',
+    inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
+  },
+  {
+    name: 'get_source_trust',
+    description: 'Get the trust score for a memory source. Sources accumulate trust from corroboration history (+0.02 per confirm, -0.15 per contradiction).',
+    inputSchema: zodToJsonSchema(z.object({
+      source_id: z.string().describe('The source identifier to look up'),
+    })) as Record<string, unknown>,
+  },
+  {
+    name: 'get_error_report',
+    description: 'Get the error monitoring (ACC) report — prediction accuracy, average TD error, surprise rate, and conflict count.',
+    inputSchema: zodToJsonSchema(z.object({})) as Record<string, unknown>,
+  },
+  {
+    name: 'get_action_policy',
+    description: 'Get the current learned action policy for a state — which actions have the highest Q-values and selection probabilities.',
+    inputSchema: zodToJsonSchema(z.object({
+      state_key: z.string().describe('The state to query the policy for'),
+    })) as Record<string, unknown>,
+  },
 ];
+
+// ── Memory Decay handlers ────────────────────────────────────────
+
+async function handleGetMemoryDecayStats(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ user_id: z.string().optional() }).parse(args);
+  const userId = resolveUserId(input.user_id);
+  const service = MemoryDecayService.get_instance();
+  const stats = await service.getDecayStats(userId);
+  if (stats.length === 0) return [{ type: 'text', text: 'No memory decay data available yet.' }];
+  const lines = stats.map(s => `**${s.memory_type.toUpperCase()}** — ${s.total_memories} total, ${s.active_memories} active, ${s.decaying_memories} decaying, ${s.forgotten_memories} forgotten (avg strength: ${s.average_strength})`);
+  return [{ type: 'text', text: `## Memory Decay Statistics\n\n${lines.join('\n\n')}` }];
+}
+
+// ── Anomaly Detection handlers ────────────────────────────────────
+
+async function handleGetAnomalyReport(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ user_id: z.string().optional() }).parse(args);
+  const userId = resolveUserId(input.user_id);
+  const service = AnomalyDetectionService.get_instance();
+  const report = await service.getAnomalyReport(userId);
+  const lines = [`**Total Ingested:** ${report.total_ingested}`, `**Normal:** ${report.normal_count}`, `**Suspect:** ${report.suspect_count}`, `**Anomalous:** ${report.anomalous_count}`, `**Quarantined:** ${report.quarantined_count}`, `**Avg Z-Score:** ${report.average_z_score}`];
+  return [{ type: 'text', text: `## Anomaly Detection Report\n\n${lines.join('\n')}` }];
+}
+
+async function handleGetQuarantinedMemories(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ user_id: z.string().optional() }).parse(args);
+  const userId = resolveUserId(input.user_id);
+  const service = AnomalyDetectionService.get_instance();
+  const quarantined = await service.getQuarantinedMemories(userId);
+  if (quarantined.length === 0) return [{ type: 'text', text: 'No quarantined memories.' }];
+  const lines = quarantined.map((q, i) => `${i + 1}. \`${q.id}\` — z=${q.z_score.toFixed(2)}, type=${q.memory_type}, corroborations=${q.corroboration_count}, quarantine: ${new Date(q.quarantined_at).toISOString().split('T')[0]}`);
+  return [{ type: 'text', text: `## Quarantined Memories (${quarantined.length})\n\n${lines.join('\n')}\n\n*Auto-rehab at 3 independent corroborations.*` }];
+}
+
+// ── Salience handlers ─────────────────────────────────────────────
+
+async function handleGetSalienceState(): Promise<TextContent[]> {
+  const service = SalienceService.get_instance();
+  const report = service.getAttentionReport();
+  const lines = [`**Meta-State:** \`${report.meta_state}\``, `**Attention Threshold:** ${report.threshold}`, `**Avg Score:** ${report.average_score}`, `**Active Goals:** ${report.active_goals.length > 0 ? report.active_goals.join(', ') : 'none'}`, '', '### Distribution', `- High: ${report.recent_high_salience_count}`, `- Medium: ${report.recent_medium_salience_count}`, `- Low: ${report.recent_low_salience_count}`];
+  return [{ type: 'text', text: `## Salience / Attention State\n\n${lines.join('\n')}` }];
+}
+
+async function handleGetAttentionReport(): Promise<TextContent[]> {
+  const service = SalienceService.get_instance();
+  const report = service.getAttentionReport();
+  const lines = [`## Attention Report`, '', `**Meta-State:** \`${report.meta_state}\``, `**Threshold:** ${report.threshold}`, `**Avg Score:** ${report.average_score}`, '', '### Processing Distribution (last 50)', `- High (>0.7): ${report.recent_high_salience_count}`, `- Medium (0.35-0.7): ${report.recent_medium_salience_count}`, `- Low (<0.35): ${report.recent_low_salience_count}`, '', '*High → full processing. Medium → embedding only. Low → minimal storage, faster decay.*'];
+  return [{ type: 'text', text: lines.join('\n') }];
+}
+
+// ── Motivation handlers ───────────────────────────────────────────
+
+async function handleGetDriveState(): Promise<TextContent[]> {
+  const engine = MotivationalEngine.get_instance();
+  const snapshot = engine.tick();
+  const lines = [`**Dominant Drive:** \`${snapshot.dominant_drive}\``, '', '| Drive | Level | Strength | Trend |', '|-------|-------|----------|-------|'];
+  for (const [name, drive] of Object.entries(snapshot.drives)) {
+    lines.push(`| ${name} | ${(drive.current_level * 100).toFixed(0)}% | ${(drive.strength * 100).toFixed(0)}% | ${drive.trend} |`);
+  }
+  return [{ type: 'text', text: `## Homeostatic Drive State\n\n${lines.join('\n')}` }];
+}
+
+async function handleGetSourceTrust(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ source_id: z.string() }).parse(args);
+  const engine = MotivationalEngine.get_instance();
+  const trust = await engine.getSourceTrust(input.source_id);
+  const lines = [`**Source:** \`${trust.source_id}\``, `**Trust Score:** ${trust.trust_score.toFixed(3)}`, `**Corroborations:** ${trust.corroboration_count}`, `**Contradictions:** ${trust.contradiction_count}`, `**Last Updated:** ${trust.last_updated.toISOString()}`];
+  return [{ type: 'text', text: `## Source Trust\n\n${lines.join('\n')}` }];
+}
+
+// ── Decision/Action handlers ──────────────────────────────────────
+
+async function handleGetErrorReport(): Promise<TextContent[]> {
+  const service = DecisionActionService.get_instance();
+  const report = service.getErrorReport();
+  const lines = [`**Accuracy:** ${(report.accuracy * 100).toFixed(1)}%`, `**Avg TD Error:** ${report.average_td_error}`, `**Surprise Rate:** ${(report.surprise_rate * 100).toFixed(1)}%`, `**Conflicts:** ${report.conflict_count}`, `**Recent Errors Tracked:** ${report.recent_prediction_errors}`];
+  return [{ type: 'text', text: `## Error Monitor (ACC)\n\n${lines.join('\n')}` }];
+}
+
+async function handleGetActionPolicy(args: unknown): Promise<TextContent[]> {
+  const input = z.object({ state_key: z.string() }).parse(args);
+  const service = DecisionActionService.get_instance();
+  const policy = service.getPolicy(input.state_key);
+  if (policy.length === 0) return [{ type: 'text', text: `No policy learned yet for \`${input.state_key}\`.` }];
+  const lines = policy.map((p, i) => `${i + 1}. \`${p.action_id}\` — Q=${p.q_value}, P(select)=${(p.probability * 100).toFixed(1)}%`);
+  return [{ type: 'text', text: `## Action Policy \`${input.state_key}\`\n\n${lines.join('\n')}` }];
+}
 
 // ── Self Model handlers ──────────────────────────────────────────
 
@@ -726,6 +873,12 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
       try {
         const vec = await embeddingService.encode(input.content);
         if (vec) {
+          const anomalyService = AnomalyDetectionService.get_instance();
+          const anomalyResult = await anomalyService.classifyAtIngestion(vec, 'episodic', userId, input.confidence ?? 1.0);
+
+          const decayService = MemoryDecayService.get_instance();
+          const strengthResult = decayService.computeRetrievalStrength('episodic', new Date(), undefined, 0);
+
           await db.collection('episodic_events').updateOne(
             { id: result.event.id },
             {
@@ -733,9 +886,19 @@ async function handleStoreMemory(args: unknown): Promise<TextContent[]> {
                 embedding: vec,
                 embedding_model: embeddingService.modelName,
                 embedding_version: embeddingService.version,
+                retrieval_strength: strengthResult.strength,
+                last_accessed_at: new Date(),
+                access_count: 0,
+                decay_exponent: strengthResult.decay_exponent,
+                anomaly_z_score: anomalyResult.z_score,
+                anomaly_classification: anomalyResult.classification,
               },
             }
           );
+
+          if (anomalyResult.classification !== 'normal') {
+            await anomalyService.recordAnomaly(result.event.id, 'episodic', userId, anomalyResult.classification, anomalyResult.z_score, anomalyResult.centroid_distance, anomalyResult.historical_mean, anomalyResult.historical_stddev, vec).catch(() => {});
+          }
         }
       } catch {
         // Embedding failed — event is still stored
@@ -2130,6 +2293,15 @@ function registerHandlers(server: Server) {
         case 'get_unresolved_threads': result = await handleGetUnresolvedThreads(args); break;
         case 'get_reflection_arc': result = await handleGetReflectionArc(args); break;
         case 'trigger_reflection': result = await handleTriggerReflection(args); break;
+        case 'get_memory_decay_stats': result = await handleGetMemoryDecayStats(args); break;
+        case 'get_anomaly_report': result = await handleGetAnomalyReport(args); break;
+        case 'get_quarantined_memories': result = await handleGetQuarantinedMemories(args); break;
+        case 'get_salience_state': result = await handleGetSalienceState(); break;
+        case 'get_attention_report': result = await handleGetAttentionReport(); break;
+        case 'get_drive_state': result = await handleGetDriveState(); break;
+        case 'get_source_trust': result = await handleGetSourceTrust(args); break;
+        case 'get_error_report': result = await handleGetErrorReport(); break;
+        case 'get_action_policy': result = await handleGetActionPolicy(args); break;
         case 'get_identity_kernel': result = await handleGetIdentityKernel(args); break;
         case 'get_mind_wander': result = await handleGetMindWander(args); break;
         case 'get_agent_beliefs': result = await handleGetAgentBeliefs(args); break;
