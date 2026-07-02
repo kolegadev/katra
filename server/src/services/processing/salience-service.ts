@@ -23,6 +23,10 @@ export interface SalienceParams {
   intensity?: number;
   confidence?: number;
   embedding?: number[];
+  priorValence?: number;
+  priorIntensity?: number;
+  newValence?: number;
+  newIntensity?: number;
 }
 
 export interface SalienceResult {
@@ -50,11 +54,11 @@ export interface AttentionReport {
 }
 
 const META_WEIGHTS: Record<MetaState, Record<string, number>> = {
-  exploration:    { novelty: 0.40, emotion: 0.20, goal: 0.15, recency: 0.10, freq: 0.10, intensity: 0.05 },
-  task_execution: { goal: 0.50, recency: 0.25, novelty: 0.10, emotion: 0.05, freq: 0.05, intensity: 0.05 },
-  reflection:     { emotion: 0.35, goal: 0.20, recency: 0.15, novelty: 0.15, freq: 0.10, intensity: 0.05 },
-  alert:          { emotion: 0.30, novelty: 0.25, recency: 0.20, goal: 0.20, freq: 0.03, intensity: 0.02 },
-  idle:           { novelty: 0.30, emotion: 0.25, recency: 0.15, goal: 0.10, freq: 0.15, intensity: 0.05 },
+  exploration:    { novelty: 0.35, emotion: 0.18, goal: 0.13, recency: 0.10, freq: 0.10, intensity: 0.05, surprise: 0.09 },
+  task_execution: { goal: 0.45, recency: 0.22, novelty: 0.10, emotion: 0.05, freq: 0.05, intensity: 0.05, surprise: 0.08 },
+  reflection:     { emotion: 0.30, goal: 0.18, recency: 0.13, novelty: 0.13, freq: 0.10, intensity: 0.05, surprise: 0.11 },
+  alert:          { emotion: 0.25, novelty: 0.20, recency: 0.18, goal: 0.18, freq: 0.03, intensity: 0.02, surprise: 0.14 },
+  idle:           { novelty: 0.28, emotion: 0.23, recency: 0.14, goal: 0.09, freq: 0.14, intensity: 0.05, surprise: 0.07 },
 };
 
 const META_AROUSAL: Record<MetaState, number> = {
@@ -121,6 +125,19 @@ export class SalienceService {
     const frequencyRarity = params.frequencyRarity ?? 0.5;
     const intensity = params.intensity ?? (params.confidence ?? 0.5);
 
+    // Bayesian surprise: belief-shift magnitude when entity emotional signature changes.
+    // High = belief-changing event (e.g. "server architecture is different")
+    // Low = inconsequential event (e.g. "it rained today")
+    let bayesianSurprise = 0;
+    if (params.priorValence !== undefined && params.newValence !== undefined) {
+      bayesianSurprise = this.computeBayesianSurprise(
+        params.priorValence ?? 0,
+        params.priorIntensity ?? 0,
+        params.newValence ?? 0,
+        params.newIntensity ?? 0
+      );
+    }
+
     const signals: Record<string, number> = {
       recency: Math.max(0, Math.min(1, recency)),
       emotionalIntensity: Math.max(0, Math.min(1, emotionalIntensity)),
@@ -128,6 +145,7 @@ export class SalienceService {
       novelty: Math.max(0, Math.min(1, novelty)),
       frequencyRarity: Math.max(0, Math.min(1, frequencyRarity)),
       intensity: Math.max(0, Math.min(1, intensity)),
+      bayesianSurprise: Math.max(0, Math.min(1, bayesianSurprise)),
     };
 
     const score =
@@ -136,7 +154,8 @@ export class SalienceService {
       weights.goal * signals.goalRelevance +
       weights.novelty * signals.novelty +
       weights.freq * signals.frequencyRarity +
-      weights.intensity * signals.intensity;
+      weights.intensity * signals.intensity +
+      (weights.surprise || 0) * signals.bayesianSurprise;
 
     const clampedScore = Math.max(0, Math.min(1, score));
 
