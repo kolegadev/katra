@@ -4,6 +4,7 @@ import { MotivationalEngine } from './motivational-engine.js';
 export interface MotivationContext {
   entityName?: string;
   userId?: string;
+  activeGoalTerms?: string[];  // PFC inhibitory control: suppress irrelevant actions
 }
 
 export interface TDError {
@@ -202,6 +203,26 @@ export class DecisionActionService {
         if (salience.divergence > 0.3) {
           temperature *= 0.7; // Narrow exploration when urgent (exploit)
           boundaryModifier *= 0.8; // Faster decisions under tension
+        }
+      }
+
+      // ── PFC Inhibitory Control ──────────────────────────────────
+      // Suppress actions irrelevant to active goal terms. Don't inhibit
+      // if ALL actions would be suppressed (avoid total blockage).
+      if (context.activeGoalTerms && context.activeGoalTerms.length > 0) {
+        const lowerTerms = context.activeGoalTerms.map(t => t.toLowerCase());
+        const relevanceScores = availableActions.map(actionId => {
+          const lower = actionId.toLowerCase();
+          return lowerTerms.filter(t => lower.includes(t) || t.includes(lower)).length;
+        });
+        const anyRelevant = relevanceScores.some((r: number) => r > 0);
+        if (anyRelevant) {
+          for (let i = 0; i < availableActions.length; i++) {
+            if (relevanceScores[i] === 0) {
+              entityBias[availableActions[i]] = (entityBias[availableActions[i]] || 0) - 0.5;
+            }
+          }
+          boundaryModifier *= 1.2; // More deliberate when inhibiting
         }
       }
     }

@@ -656,6 +656,135 @@ export class WorkingMemoryService {
             this.response_times = this.response_times.slice(-1000);
         }
     }
+
+    // ── Active Working Memory (PFC) ──────────────────────────────────
+    private readonly ACTIVE_SET_PREFIX = 'active:';
+    private readonly MAX_ACTIVE_ITEMS = 5;
+    private readonly DECAY_RATE = 0.10;  // 10% per minute
+    private readonly STRENGTH_FLOOR = 0.2;
+
+    /**
+     * Add an item to the active working memory set. Enforces capacity limit
+     * by evicting the lowest-salience item when full.
+     */
+    async addToActiveSet(
+        tenantId: string,
+        sessionId: string,
+        content: string,
+        salience: number = 0.5,
+        tags: string[] = []
+    ): Promise<string> {
+        const redis = await get_redis_client();
+        const key = `${this.ACTIVE_SET_PREFIX}${tenantId}:${sessionId}`;
+        const id = `active_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const now = Date.now();
+
+        const item = {
+            id,
+            content,
+            salience: Math.max(0, Math.min(1, salience)),
+            strength: 1.0,
+            addedAt: now,
+            lastRehearsedAt: now,
+            tags,
+        };
+
+        // Use sorted set: score = salience for eviction ordering
+        await redis.zadd(key, item.salience, JSON.stringify(item));
+
+        // Enforce capacity: evict lowest score (salience) if over limit
+        const count = await redis.zcard(key);
+        if (count > this.MAX_ACTIVE_ITEMS) {
+            await redis.zremrangebyrank(key, 0, count - this.MAX_ACTIVE_ITEMS - 1);
+        }
+
+        // Set TTL on the key
+        await redis.expire(key, 3600);
+
+        return id;
+    }
+
+    /**
+     * Rehearse all active items: refresh strength to 1.0 and apply
+     * decay to items NOT rehearsed since last call.
+     */
+    async rehearse(tenantId: string, sessionId: string): Promise<void> {
+        const redis = await get_redis_client();
+        const key = `${this.ACTIVE_SET_PREFIX}${tenantId}:${sessionId}`;
+        const now = Date.now();
+
+        const raw = await redis.zrange(key, 0, -1);
+        if (raw.length === 0) return;
+
+        const items: any[] = raw.map((r: string) => JSON.parse(r));
+        const decayed: any[] = [];
+
+        for (const item of items) {
+            const minutesSinceRehearsal = (now - item.lastRehearsedAt) / 60000;
+            const decay = this.DECAY_RATE * minutesSinceRehearsal;
+            item.strength = Math.max(this.STRENGTH_FLOOR, item.strength - decay);
+            item.lastRehearsedAt = now;
+            decayed.push(item);
+        }
+
+        // Rebuild the sorted set with updated items (salience-weighted)
+        await redis.del(key);
+        for (const item of decayed) {
+            if (item.strength > this.STRENGTH_FLOOR) {
+                await redis.zadd(key, item.salience, JSON.stringify(item));
+            }
+        }
+        await redis.expire(key, 3600);
+    }
+
+    /**
+     * Filter active items by goal relevance. Items matching goal terms
+     * retain full score; irrelevant items are down-weighted.
+     */
+    async filterByGoal(
+        tenantId: string,
+        sessionId: string,
+        goalTerms: string[]
+    ): Promise<any[]> {
+        const redis = await get_redis_client();
+        const key = `${this.ACTIVE_SET_PREFIX}${tenantId}:${sessionId}`;
+
+        const raw = await redis.zrange(key, 0, -1);
+        if (raw.length === 0) return [];
+
+        const lowerTerms = goalTerms.map(t => t.toLowerCase());
+        const items: any[] = raw.map((r: string) => JSON.parse(r));
+
+        return items
+            .filter(item => item.strength > this.STRENGTH_FLOOR)
+            .map(item => {
+                const contentLower = (item.content || '').toLowerCase();
+                const tagMatch = (item.tags || []).some((t: string) =>
+                    lowerTerms.some(g => t.toLowerCase().includes(g))
+                );
+                const contentMatch = lowerTerms.some(g => contentLower.includes(g));
+                return {
+                    ...item,
+                    goalRelevance: tagMatch || contentMatch ? 1.0 : 0.3,
+                };
+            })
+            .sort((a, b) => b.goalRelevance * b.salience - a.goalRelevance * a.salience);
+    }
+
+    /**
+     * Get active items above decay threshold.
+     */
+    async getActiveItems(tenantId: string, sessionId: string): Promise<any[]> {
+        const redis = await get_redis_client();
+        const key = `${this.ACTIVE_SET_PREFIX}${tenantId}:${sessionId}`;
+
+        const raw = await redis.zrevrange(key, 0, -1);
+        if (raw.length === 0) return [];
+
+        return raw
+            .map((r: string) => JSON.parse(r))
+            .filter((item: any) => item.strength > this.STRENGTH_FLOOR);
+    }
 }
 
 // Export singleton instance
