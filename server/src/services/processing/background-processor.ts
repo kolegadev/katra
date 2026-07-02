@@ -117,17 +117,43 @@ export class BackgroundProcessor {
           }
 
           const eventType = event.event_type;
+          const emotionalTags = event.metadata?.emotional_tags || {};
+          const isSystemEvent = SYSTEM_EVENT_TYPES.has(eventType);
+          const isPureNoise = eventType === 'heartbeat_action' || eventType === 'autonomous_action';
 
-          // System events → lightweight processing (no LLM extraction needed)
-          if (SYSTEM_EVENT_TYPES.has(eventType)) {
-            await this.processSystemEvent(event);
-            triagedCount++;
-            continue;
+          // ── Attention Gate: RL-Guided Triage Override ──────────
+          // Default: system→lightweight, user→full. But salience can override.
+          // High-arousal/caution events get full extraction even if system.
+          // Low-arousal boring events get lightweight even if user.
+          let useFullExtraction = !isSystemEvent;
+
+          if (isSystemEvent && !isPureNoise && (emotionalTags.arousal > 0.7 || emotionalTags.caution)) {
+            useFullExtraction = true;  // Promote: emotionally charged system event
+          } else if (!isSystemEvent && emotionalTags.arousal < 0.15 && !emotionalTags.caution) {
+            useFullExtraction = false; // Demote: boring user event
           }
 
-          // User/content events → full LLM extraction pipeline
-          await this.processEvent(event);
-          processedCount++;
+          // Record triage override as RL decision
+          if (isSystemEvent !== !useFullExtraction) {
+            try {
+              const actionId = useFullExtraction ? 'promote_to_full' : 'demote_to_lightweight';
+              const expected = isSystemEvent ? 0.3 : 0.7;
+              DecisionActionService.get_instance().recordOutcome(
+                `triage_override:${eventType}`,
+                actionId,
+                expected,
+                useFullExtraction ? 0.5 : 0.5  // Actual = neutral until extraction completes
+              );
+            } catch { /* non-critical */ }
+          }
+
+          if (useFullExtraction) {
+            await this.processEvent(event);
+            processedCount++;
+          } else {
+            await this.processSystemEvent(event);
+            triagedCount++;
+          }
         } catch (error) {
           console.error(`Failed to process event ${event.id}:`, (error as Error).message);
           await this.memoryManager.mark_event_processing_failed(
