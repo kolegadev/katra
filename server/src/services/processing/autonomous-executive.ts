@@ -201,37 +201,37 @@ export class AutonomousExecutive {
 
       console.log(`   ▶️ Selected: ${nextTask.title} [${nextTask.estimatedEffort}]`);
 
-      // ── Agent Allocation: who executes this? ────────────────
-      // Based on emotional proximity to the entity in the goal.
-      // Tasks involving Katra itself → allocated by reflection edge history.
+      // ── Agent Allocation with Redundancy ────────────────────
       const entityName = this.extractEntityFromGoal(goalText);
-      const allocation = await this.allocateTask(entityName);
+      let allocation = await this.allocateTask(entityName);
 
-      console.log(`   🧠 Allocated to: ${allocation.agent} (confidence: ${allocation.confidence})`);
-      console.log(`      ${allocation.rationale}`);
-
-      // Execute based on allocation
-      let executed: { success: boolean; summary: string };
-      if (allocation.agent === 'opencode-agent' && allocation.confidence > 0.55) {
-        // Delegate to OpenCoder via shared memory bulletin
-        await this.postAgentBulletin(allocation.agent, goalText, nextTask.title, allocation);
-        executed = { success: true, summary: `Task delegated to ${allocation.agent} via inter-agent bulletin` };
-      } else {
-        // Execute locally (kolega-agent or low-confidence allocation)
-        executed = await this.executeSubtask(nextTask, plan.goalId);
+      // Liveness check: if allocated agent hasn't been active in 6 hours,
+      // fall back to the other agent.
+      const liveness = await this.checkAgentLiveness(allocation.agent);
+      if (!liveness.alive) {
+        const fallback = allocation.agent === 'kolega-agent' ? 'opencode-agent' : 'kolega-agent';
+        const fallbackAlive = await this.checkAgentLiveness(fallback);
+        if (fallbackAlive.alive) {
+          console.log(`   ⚠️ ${allocation.agent} appears offline (last seen: ${liveness.lastSeen})`);
+          console.log(`   🔄 Falling back to ${fallback}`);
+          allocation = {
+            agent: fallback,
+            score: allocation.score * 0.8,
+            confidence: allocation.confidence * 0.8,
+            rationale: `Fallback: ${allocation.rationale} (${allocation.agent} offline, last seen ${liveness.lastSeen})`,
+          };
+        }
       }
 
-      // Update task progress
-      await gm.updateTaskProgress(
-        plan,
-        nextTask.id,
-        executed.success ? 'completed' : 'blocked'
+      console.log(`   🧠 Allocated to: ${allocation.agent} (confidence: ${allocation.confidence.toFixed(2)})`);
+      console.log(`      ${allocation.rationale}`);
+
+      // Execute with retry on failure
+      let executed = await this.executeWithFallback(
+        allocation, goalText, nextTask, plan.goalId, gm, plan
       );
 
-      // Log the action as an episodic event
-      await this.recordExecutiveAction(goalText, nextTask.title, executed, allocation);
-
-      console.log(`   ${executed.success ? '✅' : '⚠️'} Action: ${nextTask.title} — ${executed.summary}`);
+      console.log(`   ${executed.success ? '✅' : '❌'} Action: ${nextTask.title} — ${executed.summary}`);
     } catch (err: any) {
       console.error('   ❌ Action path failed:', err.message);
     }
@@ -345,6 +345,108 @@ export class AutonomousExecutive {
   /**
    * Extract the primary entity name from a goal text for affinity scoring.
    */
+  /**
+   * Check if an agent is alive based on recent episodic event activity.
+   * An agent is considered alive if they've produced an event in the last 6 hours.
+   */
+  private async checkAgentLiveness(
+    agent: string
+  ): Promise<{ alive: boolean; lastSeen: string }> {
+    try {
+      const db = get_database();
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+      const lastEvent = await db.collection('episodic_events').find({
+        user_id: agent,
+        timestamp: { $gte: sixHoursAgo },
+      }).sort({ timestamp: -1 }).limit(1).toArray();
+
+      if (lastEvent.length > 0) {
+        return {
+          alive: true,
+          lastSeen: new Date(lastEvent[0].timestamp).toISOString(),
+        };
+      }
+
+      // Check if they've ever been seen
+      const anyEvent = await db.collection('episodic_events').find({
+        user_id: agent,
+      }).sort({ timestamp: -1 }).limit(1).toArray();
+
+      return {
+        alive: false,
+        lastSeen: anyEvent.length > 0
+          ? new Date(anyEvent[0].timestamp).toISOString()
+          : 'never',
+      };
+    } catch {
+      return { alive: true, lastSeen: 'unknown' }; // Assume alive if can't check
+    }
+  }
+
+  /**
+   * Execute with fallback: if primary agent fails, try the other.
+   * Delegated tasks that aren't acknowledged within a timeout also fall back.
+   */
+  private async executeWithFallback(
+    allocation: { agent: string; confidence: number; rationale: string },
+    goalText: string,
+    task: { id: string; title: string; estimatedEffort: string },
+    goalId: string,
+    gm: GoalManager,
+    plan: any
+  ): Promise<{ success: boolean; summary: string }> {
+    // ── Primary attempt ────────────────────────────────────────
+    let executed: { success: boolean; summary: string };
+
+    if (allocation.agent === 'opencode-agent' && allocation.confidence > 0.55) {
+      await this.postAgentBulletin(allocation.agent, goalText, task.title, allocation);
+      executed = { success: true, summary: `Task delegated to ${allocation.agent} via bulletin` };
+    } else {
+      executed = await this.executeSubtask(task, goalId);
+    }
+
+    // Record the action (always)
+    await this.recordExecutiveAction(goalText, task.title, executed, allocation);
+
+    // Update task progress
+    await gm.updateTaskProgress(plan, task.id, executed.success ? 'completed' : 'blocked');
+
+    // ── Fallback on failure ────────────────────────────────────
+    if (!executed.success) {
+      const fallback = allocation.agent === 'kolega-agent' ? 'opencode-agent' : 'kolega-agent';
+      const fallbackAlive = await this.checkAgentLiveness(fallback);
+
+      if (fallbackAlive.alive) {
+        console.log(`   🔄 Primary agent ${allocation.agent} failed. Trying ${fallback}...`);
+
+        if (fallback === 'opencode-agent') {
+          await this.postAgentBulletin(fallback, goalText, task.title, {
+            agent: fallback,
+            score: allocation.confidence * 0.6,
+            confidence: allocation.confidence * 0.6,
+            rationale: `Fallback after ${allocation.agent} failed: ${allocation.rationale}`,
+          });
+          executed = { success: true, summary: `Reallocated to ${fallback} after primary failure` };
+        } else {
+          executed = await this.executeSubtask(task, goalId);
+        }
+
+        await this.recordExecutiveAction(goalText, task.title, executed, {
+          agent: fallback,
+          confidence: allocation.confidence * 0.6,
+          score: allocation.confidence * 0.6,
+          rationale: `Fallback: ${allocation.rationale}`,
+        });
+      } else {
+        console.log(`   ❌ Both agents unavailable. Task deferred.`);
+        executed = { success: false, summary: `Both agents offline — task deferred` };
+      }
+    }
+
+    return executed;
+  }
+
   private extractEntityFromGoal(goalText: string): string {
     const lower = goalText.toLowerCase();
     if (lower.includes('katra')) return 'Katra';
