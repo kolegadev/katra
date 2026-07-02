@@ -1,4 +1,10 @@
 import { get_database, is_database_connected } from '../../database/connection.js';
+import { MotivationalEngine } from './motivational-engine.js';
+
+export interface MotivationContext {
+  entityName?: string;
+  userId?: string;
+}
 
 export interface TDError {
   stateKey: string;
@@ -153,13 +159,59 @@ export class DecisionActionService {
     stateMap.set(actionId, value);
   }
 
-  selectAction(stateKey: string, availableActions: string[], tau?: number): DecisionResult {
-    const temperature = tau ?? TAU_BASE;
+  selectAction(stateKey: string, availableActions: string[], tauOrContext?: number | MotivationContext): DecisionResult {
+    // Support both old API (tau?: number) and new API (context?: MotivationContext)
+    let tau: number | undefined;
+    let context: MotivationContext | undefined;
+    if (typeof tauOrContext === 'number') {
+      tau = tauOrContext;
+    } else if (tauOrContext && typeof tauOrContext === 'object') {
+      context = tauOrContext;
+    }
+
+    // ── Motivation-modulated temperature ────────────────────────────
+    let temperature = tau ?? TAU_BASE;
+    let boundaryModifier = 1.0;
+    let entityBias: Record<string, number> = {};
+
+    if (context) {
+      const engine = MotivationalEngine.get_instance();
+      engine.tick();
+      const deficits = engine.getDriveDeficits();
+      const avgDeficit = engine.getAverageDeficit();
+
+      // Drive deficit → exploration temperature: higher deficit = explore more
+      temperature = TAU_BASE + avgDeficit * 1.5;
+
+      // High deficit in dominant drive → wider drift-diffusion boundary (more cautious deliberation)
+      const dominant = engine.getDominantDrive();
+      boundaryModifier = 1.0 + deficits[dominant] * 0.5;
+
+      // Entity wanting → bias action probabilities
+      if (context.entityName) {
+        const salience = engine.computeIncentiveSalience({
+          base: 0.5,
+          valence: 0.3,
+          novelty: 0.2,
+        });
+        // Wanting≠Liking divergence → urgency boost
+        if (salience.divergence > 0.3) {
+          temperature *= 0.7; // Narrow exploration when urgent (exploit)
+          boundaryModifier *= 0.8; // Faster decisions under tension
+        }
+      }
+    }
 
     const qValues: number[] = availableActions.map(a => this.getQValue(stateKey, a));
-    const maxQ = Math.max(...qValues);
+    // Apply entity bias to Q-values before softmax
+    const biasedQValues = qValues.map((q, i) => {
+      const actionId = availableActions[i];
+      const bias = entityBias[actionId] || 0;
+      return q + bias * 0.3;
+    });
+    const maxQ = Math.max(...biasedQValues);
 
-    const expValues: number[] = qValues.map(q => Math.exp((q - maxQ) / temperature));
+    const expValues: number[] = biasedQValues.map(q => Math.exp((q - maxQ) / temperature));
     const sumExp = expValues.reduce((a, b) => a + b, 0);
 
     const probabilities: number[] = expValues.map(e => e / sumExp);
@@ -175,18 +227,19 @@ export class DecisionActionService {
       }
     }
 
-    const selectedQ = qValues[selectedIndex];
+    const selectedQ = biasedQValues[selectedIndex];
+    const effectiveBoundary = DRIFT_BOUNDARY * boundaryModifier;
     const absMu = Math.abs(selectedQ);
-    const rt = 250 + (absMu > 0.0001 ? (DRIFT_BOUNDARY / absMu) * 100 : 1000);
+    const rt = 250 + (absMu > 0.0001 ? (effectiveBoundary / absMu) * 100 : 1000);
 
-    const driftEvidence = Math.max(-DRIFT_BOUNDARY, Math.min(DRIFT_BOUNDARY, selectedQ + DRIFT_SIGMA * (Math.random() * 2 - 1)));
-    const crossed = Math.abs(driftEvidence) >= DRIFT_BOUNDARY;
+    const driftEvidence = Math.max(-effectiveBoundary, Math.min(effectiveBoundary, selectedQ + DRIFT_SIGMA * (Math.random() * 2 - 1)));
+    const crossed = Math.abs(driftEvidence) >= effectiveBoundary;
 
     const allProbabilities: Record<string, number> = {};
     const qValuesMap: Record<string, number> = {};
     for (let i = 0; i < availableActions.length; i++) {
       allProbabilities[availableActions[i]] = parseFloat(probabilities[i].toFixed(4));
-      qValuesMap[availableActions[i]] = parseFloat(qValues[i].toFixed(4));
+      qValuesMap[availableActions[i]] = parseFloat(biasedQValues[i].toFixed(4));
     }
 
     const maxUnselectedProb = probabilities.filter((_, i) => i !== selectedIndex).reduce((a, b) => Math.max(a, b), 0);
@@ -197,7 +250,7 @@ export class DecisionActionService {
       confidence: parseFloat(probabilities[selectedIndex].toFixed(4)),
       exploration: parseFloat(exploration.toFixed(4)),
       evidence: parseFloat(driftEvidence.toFixed(4)),
-      threshold: DRIFT_BOUNDARY,
+      threshold: parseFloat(effectiveBoundary.toFixed(4)),
       reaction_time_ms: parseFloat(rt.toFixed(0)),
       q_values: qValuesMap,
       crossed,

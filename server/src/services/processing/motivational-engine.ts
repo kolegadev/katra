@@ -154,6 +154,21 @@ export class MotivationalEngine {
     return dominant;
   }
 
+  getDriveDeficits(): Record<DriveName, number> {
+    const deficits: Record<string, number> = {};
+    for (const name of Object.keys(this.drives) as DriveName[]) {
+      const drive = this.drives[name];
+      deficits[name] = parseFloat(Math.max(0, Math.min(1, 1 - drive.current / drive.target)).toFixed(4));
+    }
+    return deficits as Record<DriveName, number>;
+  }
+
+  getAverageDeficit(): number {
+    const deficits = this.getDriveDeficits();
+    const values = Object.values(deficits);
+    return parseFloat((values.reduce((a, b) => a + b, 0) / values.length).toFixed(4));
+  }
+
   computeIncentiveSalience(params: IncentiveSalienceParams): IncentiveSalienceResult {
     const base = params.base ?? 0.5;
     const valence = params.valence ?? 0;
