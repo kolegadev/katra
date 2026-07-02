@@ -700,9 +700,8 @@ export class MemoryManager {
       .find({ 
         'metadata.processed': { $ne: true },
         'metadata.terminal_failure': { $ne: true },
-        // Must have required fields for processing
+        // Must have id for processing — content_hash is computed on-the-fly if missing
         id: { $exists: true, $ne: null },
-        content_hash: { $exists: true, $ne: null },
         user_id: { $exists: true, $ne: null },
         session_id: { $exists: true, $ne: null },
       })

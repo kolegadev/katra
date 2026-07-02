@@ -80,27 +80,6 @@ export class BackgroundProcessor {
     this.processing = true;
 
     try {
-      const unprocessedEvents = await this.memoryManager.get_unprocessed_events(50);
-      
-      if (unprocessedEvents.length === 0) {
-        // Only log occasionally to reduce noise
-        const now = Date.now();
-        if (!this.lastNoEventsLogTime || now - this.lastNoEventsLogTime > 300000) { // 5 minutes
-          console.log('✅ No unprocessed events found');
-          this.lastNoEventsLogTime = now;
-        }
-        return;
-      }
-
-      console.log(`🔄 Processing ${unprocessedEvents.length} unprocessed events`);
-
-      let processedCount = 0;
-      let triagedCount = 0;
-      let failedCount = 0;
-
-      // System event types that don't need LLM extraction — they're internal
-      // pulses, not user content. Process them lightweight to clear the gate
-      // for high-salience events that need the full extraction pipeline.
       const SYSTEM_EVENT_TYPES = new Set([
         'heartbeat_action',
         'task_execution',
@@ -109,63 +88,85 @@ export class BackgroundProcessor {
         'agent_bulletin',
       ]);
 
-      for (const event of unprocessedEvents) {
-        try {
-          if (await this.isEventRecentlyProcessed(event)) {
-            console.log(`⏭️ Event ${event.id} already recently processed, skipping`);
-            continue;
-          }
+      let processedCount = 0;
+      let triagedCount = 0;
+      let failedCount = 0;
 
-          const eventType = event.event_type;
-          const emotionalTags = event.metadata?.emotional_tags || {};
-          const isSystemEvent = SYSTEM_EVENT_TYPES.has(eventType);
-          const isPureNoise = eventType === 'heartbeat_action' || eventType === 'autonomous_action';
+      // ── Pass 1: System Events (unlimited, triage everything) ──
+      // System events are internal pulses — triage them at full speed
+      // so they don't clog the pipeline. No bottleneck needed here.
+      const systemEvents = await this.memoryManager.get_unprocessed_events(200);
+      const sysEvents = systemEvents.filter((e: any) => SYSTEM_EVENT_TYPES.has(e.event_type));
 
-          // ── Attention Gate: RL-Guided Triage Override ──────────
-          // Default: system→lightweight, user→full. But salience can override.
-          // High-arousal/caution events get full extraction even if system.
-          // Low-arousal boring events get lightweight even if user.
-          let useFullExtraction = !isSystemEvent;
-
-          if (isSystemEvent && !isPureNoise && (emotionalTags.arousal > 0.7 || emotionalTags.caution)) {
-            useFullExtraction = true;  // Promote: emotionally charged system event
-          } else if (!isSystemEvent && emotionalTags.arousal < 0.15 && !emotionalTags.caution) {
-            useFullExtraction = false; // Demote: boring user event
-          }
-
-          // Record triage override as RL decision
-          if (isSystemEvent !== !useFullExtraction) {
-            try {
-              const actionId = useFullExtraction ? 'promote_to_full' : 'demote_to_lightweight';
-              const expected = isSystemEvent ? 0.3 : 0.7;
-              DecisionActionService.get_instance().recordOutcome(
-                `triage_override:${eventType}`,
-                actionId,
-                expected,
-                useFullExtraction ? 0.5 : 0.5  // Actual = neutral until extraction completes
-              );
-            } catch { /* non-critical */ }
-          }
-
-          if (useFullExtraction) {
-            await this.processEvent(event);
-            processedCount++;
-          } else {
+      if (sysEvents.length > 0) {
+        for (const event of sysEvents) {
+          try {
+            if (await this.isEventRecentlyProcessed(event)) continue;
             await this.processSystemEvent(event);
             triagedCount++;
+          } catch (error) {
+            console.error(`Failed to triage ${event.id}:`, (error as Error).message);
+            await this.memoryManager.mark_event_processing_failed(
+              event.id || (event as any)._id?.toString(),
+              error instanceof Error ? error.message : 'Unknown error'
+            );
+            failedCount++;
           }
-        } catch (error) {
-          console.error(`Failed to process event ${event.id}:`, (error as Error).message);
-          await this.memoryManager.mark_event_processing_failed(
-            event.id || (event as any)._id?.toString(),
-            error instanceof Error ? error.message : 'Unknown error'
-          );
-          failedCount++;
+        }
+      }
+
+      // ── Pass 2: Conversation Events (tight bottleneck: 5) ──
+      // Only 5 conversation events per cycle. This forces real
+      // prioritization — the RL loop must choose which events
+      // get the expensive LLM extraction.
+      const CONVERSATION_BATCH_SIZE = 5;
+      const allUnprocessed = await this.memoryManager.get_unprocessed_events(100);
+      const convEvents = allUnprocessed
+        .filter((e: any) => !SYSTEM_EVENT_TYPES.has(e.event_type))
+        .slice(0, CONVERSATION_BATCH_SIZE);
+
+      if (convEvents.length > 0) {
+        for (const event of convEvents) {
+          try {
+            if (await this.isEventRecentlyProcessed(event)) continue;
+
+            const emotionalTags = event.metadata?.emotional_tags || {};
+
+            // Attention gate: salience-based override for boring events
+            let useFullExtraction = true;
+            if (emotionalTags.arousal < 0.15 && !emotionalTags.caution) {
+              useFullExtraction = false;
+              // Record demotion as RL decision
+              try {
+                DecisionActionService.get_instance().recordOutcome(
+                  `triage_override:${event.event_type}`,
+                  'demote_to_lightweight',
+                  0.7,
+                  0.5
+                );
+              } catch { /* non-critical */ }
+            }
+
+            if (useFullExtraction) {
+              await this.processEvent(event);
+              processedCount++;
+            } else {
+              await this.processSystemEvent(event);
+              triagedCount++;
+            }
+          } catch (error) {
+            console.error(`Failed to process ${event.id}:`, (error as Error).message);
+            await this.memoryManager.mark_event_processing_failed(
+              event.id || (event as any)._id?.toString(),
+              error instanceof Error ? error.message : 'Unknown error'
+            );
+            failedCount++;
+          }
         }
       }
 
       if (processedCount > 0 || triagedCount > 0 || failedCount > 0) {
-        console.log(`✅ Background processing: ${processedCount} full + ${triagedCount} triaged, ${failedCount} failed`);
+        console.log(`✅ Background processing: ${processedCount} full (batch:${CONVERSATION_BATCH_SIZE}) + ${triagedCount} triaged, ${failedCount} failed`);
       }
 
       // Time-block summarization: run every 120 processing cycles (~60 min)
