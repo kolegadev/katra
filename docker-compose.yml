@@ -41,6 +41,8 @@ services:
     volumes:
       - ${DATA_DIR:-./data}/redis:/data
     command: redis-server --appendonly yes
+    ports:
+      - "${HOST_REDIS_PORT:-6384}:6379"
     networks:
       - katra-net
     healthcheck:

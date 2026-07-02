@@ -216,6 +216,49 @@ def execute(entity, dry_run=False):
         return {"entity": name, "status": "completed",
                 "output": f"Investigated entity '{name}' — {entity.get('emotion','?')} state acknowledged"}
 
+# ── Heartbeat Run Recording ─────────────────────────────────────────
+def _write_heartbeat_run(brain, interval, rationale, status="HEARTBEAT_OK", entity=None, assigned=None, confidence=None, result=None):
+    """Write a pulse record to heartbeat_runs for MCP visibility."""
+    doc = {
+        "started_at": f"new Date('{datetime.now(timezone.utc).isoformat()}')",
+        "status": status,
+        "interval": interval,
+        "rationale": rationale,
+        "events_last_hour": brain.get("events_last_hour", 0),
+        "top_salience": brain.get("top_salience", 0),
+        "unresolved_count": brain.get("unresolved_count", 0),
+        "dominant_emotion": brain.get("dominant_emotion", "none"),
+    }
+    if entity:
+        doc["tasks_due"] = [entity]
+    if assigned:
+        doc["assigned_agent"] = assigned
+        doc["confidence"] = confidence
+    if result:
+        doc["output"] = result.get("output", "")[:200]
+
+    _mongo_query(f'''
+db.heartbeat_runs.insertOne({{
+  started_at: new Date(),
+  status: "{status}",
+  interval: {interval},
+  tasks_due: {json.dumps([entity] if entity else [])},
+  assigned_agent: {json.dumps(assigned) if assigned else "null"},
+  confidence: {json.dumps(confidence) if confidence is not None else "null"},
+  salience: {brain.get("top_salience", 0)},
+  emotion: "{brain.get('dominant_emotion', 'none')}",
+  events_last_hour: {brain.get("events_last_hour", 0)},
+  unresolved_count: {brain.get("unresolved_count", 0)},
+  rationale: {json.dumps(rationale)}
+}});
+
+db.heartbeat_config.updateOne(
+  {{_id: "adaptive"}},
+  {{$set: {{interval_minutes: {int(interval/60)}, enabled: true, tasks: ["autonomous-task-allocation"], updated_at: new Date()}}}},
+  {{upsert: true}}
+);
+''')
+
 # ── State ───────────────────────────────────────────────────────────
 def _load_executed():
     if os.path.exists(EXECUTED_FILE):
@@ -243,6 +286,7 @@ def run_pulse(dry_run=False):
     ranked = brain.get("ranked", [])
     if not ranked or ranked[0].get("score", 0) < 0.15:
         print(f"  ⏭️  No actionable items. HEARTBEAT_OK")
+        _write_heartbeat_run(brain, interval, rationale, status="HEARTBEAT_OK", entity=None)
         return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain}
     
     top = ranked[0]
@@ -251,6 +295,7 @@ def run_pulse(dry_run=False):
     executed = _load_executed()
     if ahash in executed.get("hashes", []):
         print(f"  ⏭️  Already executed: {top['entity']}. HEARTBEAT_OK")
+        _write_heartbeat_run(brain, interval, rationale, status="HEARTBEAT_OK", entity=top['entity'])
         return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain}
     
     # Skip entities with recently completed or pending tasks (avoid re-allocation loop)
@@ -283,6 +328,7 @@ print(count + legacy);
             print(f"  ⏭️  Skipping {ranked[0]['entity']} (recently completed/pending) → {top['entity']}")
         else:
             print(f"  ⏭️  All top entities recently completed. HEARTBEAT_OK (idle)")
+            _write_heartbeat_run(brain, interval, rationale, status="HEARTBEAT_OK", entity=None)
             return {"status": "HEARTBEAT_OK", "interval": interval, "brain": brain}
     
     print(f"  🎯 Selected: {top['entity']} [{top['emotion']}] score={top['score']:.3f}")
@@ -330,6 +376,11 @@ print(r.insertedId);
 ''')
         executed.setdefault("hashes", []).append(ahash)
         _save_executed(executed)
+        
+        # Write to heartbeat_runs so MCP get_heartbeat_status returns data
+        _write_heartbeat_run(brain, interval, rationale, status=result['status'],
+                            entity=top['entity'], assigned=assigned,
+                            confidence=affinity['confidence'], result=result)
         
         # Post bulletin so the assigned agent discovers this task
         _post_bulletin(top['entity'], top['emotion'], top['score'], assigned, affinity['confidence'], result)

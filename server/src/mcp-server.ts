@@ -2569,10 +2569,28 @@ async function startHTTPServer(): Promise<void> {
     if (req.url === '/mcp') {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
       let transport: StreamableHTTPServerTransport | undefined;
+      let body: unknown = undefined;
+      if (req.method === 'POST') body = await readRequestBody(req);
       if (sessionId) transport = transports.get(sessionId);
-      
+
       if (!transport) {
-        transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+        const isInitRequest = body &&
+          (Array.isArray(body)
+            ? (body as any[]).some((m: any) => m.method === 'initialize')
+            : (body as any).method === 'initialize');
+
+        // Some MCP clients (e.g., OpenCode) do not reliably propagate the
+        // Mcp-Session-Id header after initialization, or send a stale session
+        // ID after the server restarts. Fall back to a stateless transport for
+        // any non-initialize request that cannot be mapped to an active session.
+        if (!isInitRequest) {
+          transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+          (transport as any)._webStandardTransport._initialized = true;
+          console.log('MCP stateless transport created for unmapped request');
+        } else {
+          transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
+        }
+
         transport.onerror = (err) => {
           console.error('MCP transport error:', err.message);
         };
@@ -2610,8 +2628,6 @@ async function startHTTPServer(): Promise<void> {
           await transport.handleRequest(req, res, undefined);
           return;
         }
-        let body: unknown = undefined;
-        if (req.method === 'POST') body = await readRequestBody(req);
         await transport.handleRequest(req, res, body);
         // After handleRequest, sessionId is set (for initialize requests).
         // Store the transport under the real session ID.

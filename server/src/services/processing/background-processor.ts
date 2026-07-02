@@ -16,6 +16,7 @@ import { TimeBlockSummarizer } from './time-block-summarizer.js';
 import { ProspectiveMemoryService } from '../memory/prospective-memory-service.js';
 import { embeddingService } from '../infrastructure/embedding-service.js';
 import { entityResolver } from '../integration/entity-resolver.js';
+import { stableContentHash } from '../infrastructure/content-hash-utils.js';
 
 export class BackgroundProcessor {
   private static instance: BackgroundProcessor;
@@ -93,16 +94,37 @@ export class BackgroundProcessor {
       console.log(`🔄 Processing ${unprocessedEvents.length} unprocessed events`);
 
       let processedCount = 0;
+      let triagedCount = 0;
       let failedCount = 0;
+
+      // System event types that don't need LLM extraction — they're internal
+      // pulses, not user content. Process them lightweight to clear the gate
+      // for high-salience events that need the full extraction pipeline.
+      const SYSTEM_EVENT_TYPES = new Set([
+        'heartbeat_action',
+        'task_execution',
+        'autonomous_action',
+        'system_update',
+        'agent_bulletin',
+      ]);
 
       for (const event of unprocessedEvents) {
         try {
-          // Check if event is already being processed or was recently processed
           if (await this.isEventRecentlyProcessed(event)) {
             console.log(`⏭️ Event ${event.id} already recently processed, skipping`);
             continue;
           }
 
+          const eventType = event.event_type;
+
+          // System events → lightweight processing (no LLM extraction needed)
+          if (SYSTEM_EVENT_TYPES.has(eventType)) {
+            await this.processSystemEvent(event);
+            triagedCount++;
+            continue;
+          }
+
+          // User/content events → full LLM extraction pipeline
           await this.processEvent(event);
           processedCount++;
         } catch (error) {
@@ -115,8 +137,8 @@ export class BackgroundProcessor {
         }
       }
 
-      if (processedCount > 0 || failedCount > 0) {
-        console.log(`✅ Background processing completed: ${processedCount} processed, ${failedCount} failed`);
+      if (processedCount > 0 || triagedCount > 0 || failedCount > 0) {
+        console.log(`✅ Background processing: ${processedCount} full + ${triagedCount} triaged, ${failedCount} failed`);
       }
 
       // Time-block summarization: run every 120 processing cycles (~60 min)
@@ -204,11 +226,28 @@ export class BackgroundProcessor {
     const sessionId = event.session_id;
     const userId = event.user_id;
     const content = event.content?.message || JSON.stringify(event.content) || '';
-    const contentHash = event.content_hash;
+
+    // Compute content_hash on the fly if missing (Python scripts write directly
+    // to MongoDB without computing it). This prevents the entire backlog from
+    // being permanently unprocessable.
+    let contentHash = event.content_hash;
+    if (!contentHash && content) {
+      contentHash = stableContentHash(userId || 'unknown', content);
+      // Persist the computed hash so future cycles don't recompute it
+      try {
+        const { get_database } = await import('../../database/connection.js');
+        const db = get_database();
+        await db.collection('episodic_events').updateOne(
+          { id: eventId },
+          { $set: { content_hash: contentHash } }
+        );
+      } catch { /* non-critical — hash will be recomputed next cycle */ }
+    }
+
     const idempotencyKey = event.idempotency_key;
 
     if (!eventId || !sessionId || !userId || !contentHash) {
-      throw new Error('Event missing required fields');
+      throw new Error(`Event missing required fields: id=${!!eventId}, session=${!!sessionId}, user=${!!userId}, contentHash=${!!contentHash}`);
     }
 
     // Acquire processing lock using the episodic event manager's lock system
@@ -381,6 +420,41 @@ export class BackgroundProcessor {
   }
 
   /**
+   * Lightweight processing for system events (heartbeat pulses, task executions,
+   * autonomous actions, etc.). These are internal system signals that don't carry
+   * user content — no LLM extraction needed. Just mark as processed so they
+   * don't clog the attention gate for high-salience user events.
+   */
+  private async processSystemEvent(event: any): Promise<void> {
+    const eventId = event.id || event._id?.toString();
+
+    // Compute content_hash if missing (Python scripts bypass MCP)
+    if (!event.content_hash && event.content) {
+      const content = event.content?.message || JSON.stringify(event.content) || '';
+      const contentHash = stableContentHash(event.user_id || 'system', content);
+      try {
+        const { get_database } = await import('../../database/connection.js');
+        const db = get_database();
+        await db.collection('episodic_events').updateOne(
+          { id: eventId },
+          { $set: { content_hash: contentHash } }
+        );
+      } catch { /* non-critical */ }
+    }
+
+    // Mark as processed with lightweight flag — no LLM extraction
+    await this.memoryManager.mark_event_processed(eventId, {
+      processed_at: new Date(),
+      extraction_result: {
+        entities_count: 0,
+        relationships_count: 0,
+        facts_count: 0,
+        reason: 'system_event_triaged',
+      },
+    });
+  }
+
+  /**
    * Embed the source episodic event and its derived semantic facts.
    * Fire-and-forget: runs async, logs on failure, never throws.
    */
@@ -542,7 +616,8 @@ export class BackgroundProcessor {
       }
     }
 
-    // Hard dedup: skip if content_hash already exists in processing_log as completed
+    // Hard dedup: skip if content_hash already exists in processing_log as completed.
+    // Also mark the event as processed so it stops being fetched every cycle.
     try {
       const { get_database } = await import('../../database/connection.js');
       const db = get_database();
@@ -553,7 +628,20 @@ export class BackgroundProcessor {
           status: 'completed',
         });
         if (existingCompleted) {
-          console.log(`🔄 Hard dedup: content ${contentHash.slice(0,8)} already fully processed, skipping`);
+          console.log(`🔄 Hard dedup: content ${contentHash.slice(0,8)} already fully processed, marking event as processed`);
+          // Fix the metadata so this event stops clogging the attention gate
+          await this.memoryManager.mark_event_processed(
+            event.id || event._id?.toString(),
+            {
+              processed_at: new Date(),
+              extraction_result: {
+                entities_count: 0,
+                relationships_count: 0,
+                facts_count: 0,
+                reason: 'hard_dedup_backfill',
+              },
+            }
+          ).catch(() => {});
           return true;
         }
       }

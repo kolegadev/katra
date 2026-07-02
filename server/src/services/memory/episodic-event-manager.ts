@@ -306,6 +306,16 @@ export class EpisodicEventManager {
     // Trigger event-driven processing for new events
     if (insertResult.id) {
       this.triggerEventDrivenProcessing(insertResult.id);
+
+      // Publish to Redis for real-time inter-agent notifications
+      if (eventData.shared_id) {
+        const tags = eventData.metadata?.tags || [];
+        if (tags.some((t: string) => ['inter-agent', 'agent-communication', 'wake'].includes(t))) {
+          this.publishInterAgentEvent(insertResult, eventData.shared_id, tags).catch(err =>
+            console.warn('⚠️ Failed to publish inter-agent event to Redis:', err.message)
+          );
+        }
+      }
     }
     
     return {
@@ -729,6 +739,43 @@ export class EpisodicEventManager {
         this.processingDebounceTimer = null;
       }
     }, 5000); // 5-second debounce window
+  }
+
+  /**
+   * Publish inter-agent event to Redis pub-sub channel for real-time notification.
+   * Subscribers (wake service, bridge, agent hooks) listen on channel:
+   *   katra:events:{shared_id}
+   */
+  private async publishInterAgentEvent(
+    event: StoredEpisodicEvent,
+    shared_id: string,
+    tags: string[]
+  ): Promise<void> {
+    try {
+      const client = await get_redis_client();
+      if (!client) return;
+
+      const channel = `katra:events:${shared_id}`;
+      const content_preview = typeof event.content?.message === 'string'
+        ? event.content.message.substring(0, 300)
+        : JSON.stringify(event.content).substring(0, 300);
+
+      const payload = JSON.stringify({
+        type: 'inter-agent-message',
+        event_id: event.id,
+        shared_id,
+        from_user_id: event.user_id,
+        session_id: event.session_id,
+        tags,
+        content_preview,
+        timestamp: new Date().toISOString(),
+      });
+
+      await client.publish(channel, payload);
+      console.log(`📡 Published to Redis channel ${channel} (${content_preview.length} chars)`);
+    } catch (err: any) {
+      console.warn(`⚠️ Redis publish failed for event ${event.id}:`, err.message);
+    }
   }
 
   /**

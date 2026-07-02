@@ -10,6 +10,7 @@ import { working_memory_service } from '../services/memory/working-memory-servic
 import { learning_feedback_service, AuthorizationError } from '../services/processing/learning-feedback-service.js';
 import { database_optimization_service } from '../services/infrastructure/database-optimization-service.js';
 import { get_database } from '../database/connection.js';
+import { get_redis_client } from '../database/redis-connection.js';
 import { escape_regex } from '../utils/regex-escape.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateContentHash, generateIdempotencyKey } from '../services/infrastructure/content-hash-utils.js';
@@ -380,7 +381,7 @@ export const create_memory_routes = (): Hono => {
                 session_id: session_id || uuidv4(),
             });
 
-            await db.collection('episodic_events').insertOne({
+            const result = await db.collection('episodic_events').insertOne({
                 id: event_id,
                 user_id,
                 session_id: session_id || uuidv4(),
@@ -393,6 +394,30 @@ export const create_memory_routes = (): Hono => {
             });
 
             console.log('📝 Stored episodic event');
+
+            // Real-time inter-agent notification via Redis pub-sub
+            const shared_id = body.shared_id || metadata?.shared_id;
+            const tags = metadata?.tags || body.tags || [];
+            if (shared_id && tags.some((t: string) => ['inter-agent', 'agent-communication'].includes(t))) {
+                try {
+                    const redis = await get_redis_client();
+                    if (redis) {
+                        const preview = typeof content === 'string' ? content.substring(0, 300) : JSON.stringify(content).substring(0, 300);
+                        await redis.publish(`katra:events:${shared_id}`, JSON.stringify({
+                            type: 'inter-agent-message',
+                            event_id,
+                            shared_id,
+                            from_user_id: user_id,
+                            tags,
+                            content_preview: preview,
+                            timestamp: new Date().toISOString(),
+                        }));
+                        console.log(`📡 Published to Redis channel katra:events:${shared_id}`);
+                    }
+                } catch (pubErr: any) {
+                    console.warn('⚠️ Redis publish failed:', pubErr.message);
+                }
+            }
 
             return c.json({
                 success: true,

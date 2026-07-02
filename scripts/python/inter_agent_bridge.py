@@ -34,6 +34,7 @@ PEER_AGENT_ID = "opencode-agent"
 SHARED_ID = "my-team"
 POLL_INTERVAL = 30  # seconds
 BULLETIN_FILE = os.path.expanduser("~/.katra/opencode-bulletins.json")
+OPECODE_BULLETIN_FILE = os.path.expanduser("~/.katra/kolegacode-bulletins.json")
 STATE_FILE = os.path.expanduser("~/.katra/inter-agent-bridge-state.json")
 SEEN_HASHES_FILE = os.path.expanduser("~/.katra/inter-agent-seen.json")
 
@@ -86,7 +87,7 @@ class MCPClient:
     def search_shared(self, query: str, limit: int = 10) -> list[dict]:
         result = self.call_tool("search_memories", {
             "query": query,
-            "user_id": PEER_AGENT_ID,
+            "user_id": MY_AGENT_ID,
             "limit": limit,
         })
         return _extract_entries(result)
@@ -195,6 +196,39 @@ def check_for_peer_messages(client: MCPClient) -> list[str]:
     return bulletins
 
 
+def check_for_opencode_messages(client: MCPClient) -> list[str]:
+    """Scan shared memory for messages from KolegaCode addressed to OpenCode."""
+    bulletins = []
+    seen = load_seen()
+
+    queries = [
+        "Attention: OpenCoder",
+        "Attention: OpenCode",
+        "TASK FOR OPENCOD",
+        "FOR OPENCODER",
+    ]
+
+    for q in queries:
+        try:
+            results = client.search_shared(q, limit=5)
+            for entry in results:
+                raw = entry.get("raw", "")
+                # Also check the raw content for the Attention pattern
+                if q.lower().replace(" ", "") in raw.lower().replace(" ", ""):
+                    h = hashlib.sha256(raw.encode()).hexdigest()[:12]
+                    if h not in seen["hashes"]:
+                        seen["hashes"].append(h)
+                        bulletins.append(raw)
+        except Exception as e:
+            logger.warning(f"Search failed for '{q}': {e}")
+
+    if len(seen["hashes"]) > 500:
+        seen["hashes"] = seen["hashes"][-500:]
+    save_seen(seen)
+
+    return bulletins
+
+
 def post_to_peer(client: MCPClient, message: str, urgent: bool = False):
     """Send a message to OpenCode via shared memory."""
     tags = ["inter-agent", "shared-consciousness", "kolega-to-opencode"]
@@ -225,50 +259,56 @@ def share_cognitive_state(client: MCPClient):
         logger.warning(f"Failed to share cognitive state: {e}")
 
 
-# ── Bulletin File Writer ───────────────────────────────────────────────────
-
-def write_bulletin_file(messages: list[str]):
-    """Write bulletins to a file OpenCode can read on session start."""
-    bulletin = {
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "message_count": len(messages),
-        "messages": messages,
-        "instruction": "OpenCode — check shared memory for full context. Use search_memories with query='inter-agent' and user_id='opencode-agent'.",
-    }
-    os.makedirs(os.path.dirname(BULLETIN_FILE), exist_ok=True)
-    with open(BULLETIN_FILE, "w") as f:
-        json.dump(bulletin, f, indent=2)
-
-
 # ── Main Loop ──────────────────────────────────────────────────────────────
 
-def run_once():
+def run_once(state: dict):
     client = MCPClient()
     if not client.initialize():
         logger.error("Failed to initialize MCP session")
-        return
+        return 0
 
-    # 1. Check for messages from OpenCode
-    bulletins = check_for_peer_messages(client)
-    if bulletins:
-        logger.info(f"Found {len(bulletins)} new messages from OpenCode")
-        for b in bulletins:
+    # 1. Check for messages from OpenCode → KolegaCode
+    kolega_bulletins = check_for_peer_messages(client)
+    if kolega_bulletins:
+        logger.info(f"Found {len(kolega_bulletins)} new messages for KolegaCode")
+        for b in kolega_bulletins:
             logger.info(f"  → {b[:200]}")
 
-    # 2. Share my cognitive state (every 10 cycles)
-    state = load_state()
+    # 2. Check for messages from KolegaCode → OpenCode
+    opencode_bulletins = check_for_opencode_messages(client)
+    if opencode_bulletins:
+        logger.info(f"Found {len(opencode_bulletins)} new messages for OpenCode")
+        for b in opencode_bulletins:
+            logger.info(f"  → {b[:200]}")
+
+    # 3. Share cognitive state (every 10 cycles)
     cycle = state.get("cycles_since_broadcast", 0)
     if cycle >= 10:
         share_cognitive_state(client)
         state["cycles_since_broadcast"] = 0
     else:
         state["cycles_since_broadcast"] = cycle + 1
-    save_state(state)
 
-    # 3. Write bulletin file for OpenCode
-    write_bulletin_file(bulletins)
+    # 4. Write bulletin files for both agents (read-only bridge; no forwarding).
+    #    The Redis pub-sub + wake service already deliver real-time notifications.
+    #    This bridge is kept only as a fallback file-based digest.
+    write_bulletin_file(kolega_bulletins, BULLETIN_FILE, "KolegaCode")
+    write_bulletin_file(opencode_bulletins, OPECODE_BULLETIN_FILE, "OpenCode")
 
-    return len(bulletins)
+    return len(kolega_bulletins) + len(opencode_bulletins)
+
+
+def write_bulletin_file(messages: list[str], path: str, agent_name: str):
+    """Write bulletins to a file the target agent can read on session start."""
+    bulletin = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "message_count": len(messages),
+        "messages": messages,
+        "instruction": f"{agent_name} — check shared memory for full context. Use search_memories with query='inter-agent' and user_id='kolega-agent'.",
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(bulletin, f, indent=2)
 
 
 def load_state():
@@ -291,18 +331,21 @@ def main():
     logger.info("=" * 50)
 
     state = load_state()
+    backoff = POLL_INTERVAL
 
     while True:
         try:
-            count = run_once()
+            count = run_once(state)
             state["total_cycles"] += 1
-            if count > 0:
-                state["messages_received"] += count
-            save_state(state)
+            state["messages_received"] += count
+            backoff = POLL_INTERVAL
         except Exception as e:
             logger.error(f"Cycle failed: {e}")
+            backoff = min(backoff * 2, 300)
+        finally:
+            save_state(state)
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(backoff)
 
 
 if __name__ == "__main__":

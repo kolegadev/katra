@@ -68,13 +68,20 @@ export class SleepConsolidationService {
 
   private startHeartbeat(): void {
     // Run immediately on startup — catches overdue consolidations right away
-    this.checkAndRunOverdue();
+    this.checkAndRunOverdue().catch((err) =>
+      console.error('❌ checkAndRunOverdue failed:', err)
+    );
     setInterval(() => {
-      this.checkAndRunOverdue();
+      this.checkAndRunOverdue().catch((err) =>
+        console.error('❌ checkAndRunOverdue failed:', err)
+      );
     }, 30 * 60 * 1000); // every 30 minutes
   }
 
-  private checkAndRunOverdue(): void {
+  private async checkAndRunOverdue(): Promise<void> {
+    // Load persisted last-run times from DB on first call (survives restarts)
+    await this.loadLastRuns();
+    
     const now = new Date();
     const periods: Array<'daily' | 'weekly' | 'monthly'> = ['daily', 'weekly', 'monthly'];
     for (const period of periods) {
@@ -109,6 +116,40 @@ export class SleepConsolidationService {
   }
 
   private lastRunTimes: Map<string, number> = new Map();
+  private lastRunTimesLoaded = false;
+
+  private async persistLastRun(period: string, timestamp: number): Promise<void> {
+    try {
+      const db = get_database();
+      await db.collection('consolidation_runs').updateOne(
+        { period_type: period },
+        { $set: { last_run_at: new Date(timestamp), updated_at: new Date() } },
+        { upsert: true }
+      );
+    } catch (err: any) {
+      console.warn(`⚠️ Failed to persist ${period} last run:`, err.message);
+    }
+  }
+
+  private async loadLastRuns(): Promise<void> {
+    if (this.lastRunTimesLoaded) return;
+    try {
+      const db = get_database();
+      const docs = await db.collection('consolidation_runs').find({}).toArray();
+      for (const doc of docs) {
+        if (doc.period_type && doc.last_run_at) {
+          const ts = new Date(doc.last_run_at).getTime();
+          if (!isNaN(ts)) {
+            this.lastRunTimes.set(doc.period_type, ts);
+            console.log(`📅 Loaded ${doc.period_type} last run: ${new Date(ts).toISOString()}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Failed to load last run times:`, err.message);
+    }
+    this.lastRunTimesLoaded = true;
+  }
 
   private schedulePeriod(key: string, hour: number, minute: number): void {
     const MAX_DELAY = 2147483647;
@@ -251,13 +292,13 @@ export class SleepConsolidationService {
     try {
       console.log(`🌙 Starting ${period} sleep consolidation for ${userId}...`);
 
-      // Phase 0: Record run attempt timestamp (for heartbeat safety net)
-      this.lastRunTimes.set(period, Date.now());
-
       // Phase 1: Gather
       const data = await this.gatherData(userId, periodStart, now, period);
       if (data.event_count === 0 && data.session_count === 0) {
         console.log(`🌙 No activity in ${period} period, skipping consolidation`);
+        // Still record successful run (no data is a valid outcome)
+        this.lastRunTimes.set(period, Date.now());
+        this.persistLastRun(period, Date.now()).catch(() => {});
         return {
           success: true,
           period_type: period,
@@ -283,6 +324,10 @@ export class SleepConsolidationService {
 
       // Phase 4: Store results
       const result = await this.storeResults(llmOutput, data, userId, periodStart, now, period);
+      
+      // Record successful run (only on success, so safety net can retry on failure)
+      this.lastRunTimes.set(period, Date.now());
+      this.persistLastRun(period, Date.now()).catch(() => {});
       
       console.log(`✅ ${period} consolidation complete in ${Date.now() - startTime}ms`);
       return result;
