@@ -173,7 +173,7 @@ export class BackgroundProcessor {
       if (this.processingCycleCount % 120 === 0) {
         try {
           const summarizer = new TimeBlockSummarizer();
-          const uniqueUsers = [...new Set(unprocessedEvents.map((e: any) => e.user_id).filter(Boolean))];
+          const uniqueUsers = [...new Set([...sysEvents, ...convEvents].map((e: any) => e.user_id).filter(Boolean))];
           for (const userId of uniqueUsers) {
             const result = await summarizer.summarizeTimeBlocks({
               user_id: userId,

@@ -19,6 +19,7 @@ import { get_llm_config_from_db } from './services/infrastructure/llm-service.js
 import { embeddingService } from './services/infrastructure/embedding-service.js';
 import { BackgroundProcessor } from './services/processing/background-processor.js';
 import { SleepConsolidationService } from './services/processing/sleep-consolidation-service.js';
+import { AutonomousExecutive } from './services/processing/autonomous-executive.js';
 
 // Routes
 import { create_memory_routes } from './routes/memory-routes.js';
@@ -114,6 +115,10 @@ async function main() {
     weekly: { dayOfWeek: 0, hour: 3, minute: 0 },  // Sunday 3:00 AM
     monthly:{ dayOfMonth: 1, hour: 4, minute: 0 }, // 1st of month 4:00 AM
   });
+
+  // Start autonomous executive loop (self-initiated decision-action)
+  const executive = AutonomousExecutive.get_instance();
+  executive.start();
 
   // ── REST API Server (Hono) ──
   const app = new Hono();
@@ -229,6 +234,7 @@ async function main() {
     console.log(`\n${signal} received, shutting down...`);
     bgProcessor.stop();
     sleepService.stop();
+    executive.stop();
     await close_redis_connection();
     process.exit(0);
   };

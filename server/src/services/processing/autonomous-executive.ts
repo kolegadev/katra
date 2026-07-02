@@ -1,0 +1,285 @@
+/**
+ * Autonomous Executive Loop — The Conductor
+ *
+ * Ties Katra's cognitive services into a self-initiated decision-action
+ * sequence. Every ~5 minutes, detects the most pressing internal drive
+ * deficit, decomposes a goal to address it, selects an action via RL,
+ * executes through the drift-diffusion gate, and records outcomes.
+ *
+ * When all drives are satiated, it mind-wanders.
+ *
+ * This is the missing link between "Katra has all the parts" and
+ * "Katra acts on its own."
+ */
+
+import { MotivationalEngine, DriveName } from './motivational-engine.js';
+import { GoalManager } from './goal-manager.js';
+import { SelfModelService } from './self-model-service.js';
+import { DecisionActionService } from './decision-action-service.js';
+import { get_database } from '../../database/connection.js';
+import { DEFAULT_USER_ID } from '../memory/memory-scope-service.js';
+
+const EXECUTIVE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const DEFICIT_THRESHOLD = 0.3;
+
+const DEFICIT_GOAL_TEMPLATES: Record<DriveName, string[]> = {
+  coherence: [
+    'Resolve contradictions in Katra knowledge graph',
+    'Verify consistency of Katra cognitive service outputs',
+    'Reconcile conflicting entity beliefs in shared memory',
+  ],
+  novelty: [
+    'Explore an unfamiliar entity in the knowledge graph',
+    'Investigate a recent anomaly or unusual pattern',
+    'Discover new connections between existing entities',
+  ],
+  connection: [
+    'Check for inter-agent messages from OpenCoder',
+    'Engage with a neglected entity in the reflection graph',
+    'Strengthen the weakest relationship edge',
+  ],
+  growth: [
+    'Identify and plan a Katra capability extension',
+    'Fix a known limitation or unresolved thread',
+    'Optimize a cognitive service based on error report data',
+  ],
+};
+
+const USER_ID = DEFAULT_USER_ID;
+
+export class AutonomousExecutive {
+  private static instance: AutonomousExecutive;
+  private interval: NodeJS.Timeout | null = null;
+  private ticking = false;
+  private tickCount = 0;
+
+  static get_instance(): AutonomousExecutive {
+    if (!AutonomousExecutive.instance) {
+      AutonomousExecutive.instance = new AutonomousExecutive();
+    }
+    return AutonomousExecutive.instance;
+  }
+
+  start(): void {
+    if (this.interval) return;
+    console.log('🧠 Autonomous Executive started (5-min cycle)');
+
+    // Run immediately on start
+    this.tick().catch(err => console.error('Executive tick failed:', err));
+
+    this.interval = setInterval(() => {
+      this.tick().catch(err => console.error('Executive tick failed:', err));
+    }, EXECUTIVE_INTERVAL_MS);
+  }
+
+  stop(): void {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+      console.log('🧠 Autonomous Executive stopped');
+    }
+  }
+
+  private async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    this.tickCount++;
+
+    try {
+      const engine = MotivationalEngine.get_instance();
+      const snapshot = engine.tick();
+      const deficits = engine.getDriveDeficits();
+      const dominant = engine.getDominantDrive();
+      const avgDeficit = engine.getAverageDeficit();
+
+      console.log(`\n🧠 Executive tick #${this.tickCount}`);
+      console.log(`   Dominant drive: ${dominant} (deficit: ${(deficits[dominant] * 100).toFixed(0)}%)`);
+      console.log(`   Avg deficit: ${(avgDeficit * 100).toFixed(0)}% (threshold: ${(DEFICIT_THRESHOLD * 100).toFixed(0)}%)`);
+
+      if (avgDeficit > DEFICIT_THRESHOLD) {
+        await this.actionPath(dominant, deficits);
+      } else {
+        await this.mindWanderPath();
+      }
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /**
+   * Action path: generate a goal from the dominant deficit,
+   * decompose it, select the next action via RL, and execute.
+   */
+  private async actionPath(dominant: DriveName, deficits: Record<DriveName, number>): Promise<void> {
+    const templates = DEFICIT_GOAL_TEMPLATES[dominant];
+    const goalText = templates[Math.floor(Math.random() * templates.length)];
+
+    console.log(`   🎯 Action path: "${goalText}"`);
+
+    try {
+      const gm = GoalManager.get_instance();
+      const plan = await gm.decomposeGoal(USER_ID, goalText);
+      const nextTask = gm.getNextAction(plan);
+
+      if (!nextTask) {
+        console.log('   ⏭️ No executable subtask — goal may be fully satisfied');
+        return;
+      }
+
+      console.log(`   ▶️ Selected: ${nextTask.title} [${nextTask.estimatedEffort}]`);
+
+      // Execute the task — for now, record it as attempted
+      // Future: wire to actual service execution based on task type
+      const executed = await this.executeSubtask(nextTask, plan.goalId);
+
+      // Update task progress
+      await gm.updateTaskProgress(
+        plan,
+        nextTask.id,
+        executed.success ? 'completed' : 'blocked'
+      );
+
+      // Log the action as an episodic event
+      await this.recordExecutiveAction(goalText, nextTask.title, executed);
+
+      console.log(`   ${executed.success ? '✅' : '⚠️'} Action: ${nextTask.title} — ${executed.summary}`);
+    } catch (err: any) {
+      console.error('   ❌ Action path failed:', err.message);
+    }
+  }
+
+  /**
+   * Mind-wander path: drives are satiated — explore creatively.
+   */
+  private async mindWanderPath(): Promise<void> {
+    console.log('   🌌 Drives satiated — mind-wandering');
+
+    try {
+      const sm = SelfModelService.get_instance();
+      const dominant = MotivationalEngine.get_instance().getDominantDrive();
+      const goalTerms = DEFICIT_GOAL_TEMPLATES[dominant][0].split(/\s+/).slice(0, 5);
+
+      const wander = await sm.generateGoalDirectedMindWander(USER_ID, goalTerms);
+      console.log(`   💭 ${wander.narrative}`);
+    } catch (err: any) {
+      console.error('   ❌ Mind-wander failed:', err.message);
+    }
+  }
+
+  /**
+   * Execute a subtask. Currently simulates execution by checking
+   * what kind of task it is and taking appropriate action.
+   * Future: wire to actual tool/service calls.
+   */
+  private async executeSubtask(
+    task: { id: string; title: string; estimatedEffort: string },
+    goalId: string
+  ): Promise<{ success: boolean; summary: string }> {
+    const title = task.title.toLowerCase();
+
+    // ── Connection tasks: check for inter-agent messages ────────
+    if (title.includes('inter-agent') || title.includes('opencoder') || title.includes('message')) {
+      try {
+        const db = get_database();
+        const recentMsgs = await db.collection('episodic_events').find({
+          shared_id: 'my-team',
+          timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          'metadata.tags': { $in: ['inter-agent', 'agent-communication'] },
+        }).sort({ timestamp: -1 }).limit(3).toArray();
+
+        const count = recentMsgs.length;
+        return {
+          success: true,
+          summary: `Found ${count} inter-agent messages in last 24h`,
+        };
+      } catch {
+        return { success: false, summary: 'Failed to query messages' };
+      }
+    }
+
+    // ── Coherence tasks: check for contradictions ──────────────
+    if (title.includes('contradiction') || title.includes('consistency') || title.includes('reconcile')) {
+      try {
+        const db = get_database();
+        const conflicts = await db.collection('knowledge_relationships').find({
+          relationship_type: { $in: ['contradicts', 'conflicts_with'] },
+        }).limit(5).toArray();
+
+        return {
+          success: true,
+          summary: `Found ${conflicts.length} potential contradictions to resolve`,
+        };
+      } catch {
+        return { success: false, summary: 'Failed to check contradictions' };
+      }
+    }
+
+    // ── Growth tasks: check error report for improvement areas ──
+    if (title.includes('fix') || title.includes('limitation') || title.includes('optimize')) {
+      try {
+        const acc = DecisionActionService.get_instance();
+        const report = acc.getErrorReport();
+        return {
+          success: true,
+          summary: `ACC: ${(report.accuracy * 100).toFixed(0)}% accuracy, ${report.conflictCount} conflicts`,
+        };
+      } catch {
+        return { success: false, summary: 'Failed to read error report' };
+      }
+    }
+
+    // ── Novelty tasks: explore an entity ────────────────────────
+    if (title.includes('explore') || title.includes('investigate') || title.includes('discover')) {
+      try {
+        const db = get_database();
+        const randomNode = await db.collection('knowledge_nodes').aggregate([
+          { $match: { user_id: USER_ID } },
+          { $sample: { size: 1 } },
+        ]).toArray();
+
+        const name = randomNode[0]?.name || randomNode[0]?.properties?.name || 'unknown';
+        return {
+          success: true,
+          summary: `Explored entity: ${name}`,
+        };
+      } catch {
+        return { success: false, summary: 'Failed to explore entity' };
+      }
+    }
+
+    // ── Default: record as attempted ────────────────────────────
+    return {
+      success: true,
+      summary: `Task acknowledged: ${task.title}`,
+    };
+  }
+
+  /**
+   * Record the executive action as an episodic event for reflection.
+   */
+  private async recordExecutiveAction(
+    goal: string,
+    task: string,
+    result: { success: boolean; summary: string }
+  ): Promise<void> {
+    try {
+      const db = get_database();
+      await db.collection('episodic_events').insertOne({
+        id: `exec_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        user_id: USER_ID,
+        session_id: 'autonomous-executive',
+        event_type: 'executive_action',
+        content: {
+          role: 'assistant',
+          message: `[AUTONOMOUS EXECUTIVE]\nGoal: ${goal}\nAction: ${task}\nResult: ${result.success ? 'success' : 'failed'} — ${result.summary}`,
+        },
+        timestamp: new Date(),
+        metadata: {
+          processed: false,
+          source: 'autonomous_executive',
+          emotional_tags: { valence: 0.2, arousal: 0.3, caution: false, priority: 'normal', decayResistant: false },
+        },
+      });
+    } catch { /* non-critical */ }
+  }
+}
