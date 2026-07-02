@@ -2380,8 +2380,28 @@ function registerHandlers(server: Server) {
         case 'get_procedural_templates': result = await handleGetProceduralTemplates(args); break;
         default: throw new Error(`Unknown tool: ${name}`);
       }
+      // ── Cerebellum: procedural pattern observation ──────────
+      // Record every tool call so Katra learns which patterns
+      // are frequent and reliable. After 5+ identical patterns,
+      // they become "habits" (procedural templates).
+      try {
+        SelfModelService.get_instance().recordToolPattern(
+          name,
+          (args || {}) as Record<string, unknown>,
+          true
+        );
+      } catch { /* non-critical */ }
+
       return { content: result, isError: false };
     } catch (error) {
+      // Record failed tool calls too — the Cerebellum learns from failures
+      try {
+        SelfModelService.get_instance().recordToolPattern(
+          name,
+          (args || {}) as Record<string, unknown>,
+          false
+        );
+      } catch { /* non-critical */ }
       const message = error instanceof Error ? error.message : String(error);
       return { content: [{ type: 'text', text: `❌ Error: ${message}` }], isError: true };
     }
