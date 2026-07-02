@@ -53,6 +53,8 @@ const TAU_BASE = 0.5;
 const DRIFT_SIGMA = 0.1;
 const DRIFT_BOUNDARY = 1.0;
 
+const MAX_ACCUMULATOR_CYCLES = 10;  // Force decision after 10 cycles
+
 export class DecisionActionService {
   private static instance: DecisionActionService;
   private qTable: Map<string, Map<string, number>> = new Map();
@@ -70,6 +72,8 @@ export class DecisionActionService {
   private correctCount = 0;
   private surpriseCount = 0;
   private actionLog: TDError[] = [];
+  private evidenceAccumulators: Map<string, number> = new Map();
+  private accumulatorCycles: Map<string, number> = new Map();
 
   private constructor() {}
 
@@ -229,11 +233,29 @@ export class DecisionActionService {
 
     const selectedQ = biasedQValues[selectedIndex];
     const effectiveBoundary = DRIFT_BOUNDARY * boundaryModifier;
-    const absMu = Math.abs(selectedQ);
-    const rt = 250 + (absMu > 0.0001 ? (effectiveBoundary / absMu) * 100 : 1000);
 
-    const driftEvidence = Math.max(-effectiveBoundary, Math.min(effectiveBoundary, selectedQ + DRIFT_SIGMA * (Math.random() * 2 - 1)));
-    const crossed = Math.abs(driftEvidence) >= effectiveBoundary;
+    // ── Drift-Diffusion Evidence Accumulation ──────────────────────
+    // Evidence accumulates across cycles: dx = μ·dt + σ·dW
+    // Decision fires only when evidence crosses boundary or timeout reached.
+    const mu = selectedQ;
+    const noise = DRIFT_SIGMA * (Math.random() * 2 - 1);  // Approximate dW
+    let evidence = (this.evidenceAccumulators.get(stateKey) || 0) + mu * 0.1 + noise;
+    evidence = Math.max(-effectiveBoundary, Math.min(effectiveBoundary, evidence));
+    this.evidenceAccumulators.set(stateKey, evidence);
+    
+    const cycles = (this.accumulatorCycles.get(stateKey) || 0) + 1;
+    this.accumulatorCycles.set(stateKey, cycles);
+
+    const crossed = Math.abs(evidence) >= effectiveBoundary || cycles >= MAX_ACCUMULATOR_CYCLES;
+
+    if (crossed) {
+      // Decision made — reset accumulator for next round
+      this.evidenceAccumulators.delete(stateKey);
+      this.accumulatorCycles.delete(stateKey);
+    }
+
+    const absMu = Math.abs(mu);
+    const rt = 250 + (absMu > 0.0001 ? (effectiveBoundary / absMu) * 100 : 1000) + cycles * 50;  // RT grows with deliberation
 
     const allProbabilities: Record<string, number> = {};
     const qValuesMap: Record<string, number> = {};
@@ -246,10 +268,10 @@ export class DecisionActionService {
     const exploration = 1 - (probabilities[selectedIndex] - maxUnselectedProb);
 
     return {
-      selected_action: availableActions[selectedIndex],
-      confidence: parseFloat(probabilities[selectedIndex].toFixed(4)),
+      selected_action: crossed ? availableActions[selectedIndex] : '',
+      confidence: crossed ? parseFloat(probabilities[selectedIndex].toFixed(4)) : 0,
       exploration: parseFloat(exploration.toFixed(4)),
-      evidence: parseFloat(driftEvidence.toFixed(4)),
+      evidence: parseFloat(evidence.toFixed(4)),
       threshold: parseFloat(effectiveBoundary.toFixed(4)),
       reaction_time_ms: parseFloat(rt.toFixed(0)),
       q_values: qValuesMap,
