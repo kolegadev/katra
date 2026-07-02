@@ -69,6 +69,8 @@ const META_AROUSAL: Record<MetaState, number> = {
   idle: 0.20,
 };
 
+import { DecisionActionService } from './decision-action-service.js';
+
 export class SalienceService {
   private static instance: SalienceService;
   private metaState: MetaState = 'idle';
@@ -231,6 +233,46 @@ export class SalienceService {
       goal_count: this.goalEmbeddings.size,
       recent_scores: [...this.recentScores].slice(-20),
     };
+  }
+
+  /**
+   * ACC → Thalamus feedback loop. Reads error/surprise signals from
+   * DecisionActionService and interpolates salience weights toward the
+   * appropriate meta-state profile. Smooth transitions (10% per cycle)
+   * prevent oscillation. Called from background processor each cycle.
+   */
+  adaptWeights(): void {
+    try {
+      const acc = DecisionActionService.get_instance();
+      const surpriseRate = acc.getSurpriseRate();
+      const accuracy = acc.getRecentAccuracy();
+      const totalOutcomes = acc.getTotalOutcomes();
+
+      // No outcomes yet — stay at current weights (bootstrap phase)
+      if (totalOutcomes === 0) return;
+
+      // Determine target meta-state from ACC signals
+      let targetState: MetaState = this.metaState;
+      if (surpriseRate > 0.3) {
+        targetState = 'exploration';  // High surprise → explore broadly
+      } else if (accuracy > 0.7 && surpriseRate < 0.1) {
+        targetState = 'task_execution';  // High accuracy, low surprise → exploit
+      } else if (totalOutcomes < 10) {
+        targetState = 'idle';  // Bootstrap — not enough data yet
+      }
+
+      // Smooth interpolation: 10% toward target per cycle
+      const targetWeights = META_WEIGHTS[targetState];
+      for (const state of Object.keys(META_WEIGHTS) as MetaState[]) {
+        const current = META_WEIGHTS[state];
+        for (const weight of Object.keys(current)) {
+          const targetVal = targetWeights[weight] || current[weight];
+          current[weight] = parseFloat((current[weight] * 0.9 + targetVal * 0.1).toFixed(4));
+        }
+      }
+    } catch {
+      // ACC not available — keep current weights (non-critical)
+    }
   }
 
   private computeMaxGoalSimilarity(embedding: number[]): number {

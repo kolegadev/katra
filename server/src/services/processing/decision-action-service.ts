@@ -308,6 +308,20 @@ export class DecisionActionService {
     };
   }
 
+  getSurpriseRate(): number {
+    const totalOutcomes = this.outcomeLog.length;
+    return totalOutcomes > 0 ? parseFloat((this.surpriseCount / totalOutcomes).toFixed(4)) : 0;
+  }
+
+  getRecentAccuracy(): number {
+    const totalOutcomes = this.outcomeLog.length;
+    return totalOutcomes > 0 ? parseFloat((this.correctCount / totalOutcomes).toFixed(4)) : 0;
+  }
+
+  getTotalOutcomes(): number {
+    return this.outcomeLog.length;
+  }
+
   getPolicy(stateKey: string): PolicyEntry[] {
     const stateMap = this.qTable.get(stateKey);
     if (!stateMap || stateMap.size === 0) {

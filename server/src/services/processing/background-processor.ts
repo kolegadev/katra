@@ -164,6 +164,14 @@ export class BackgroundProcessor {
       }
       this.processingCycleCount = (this.processingCycleCount || 0) + 1;
 
+      // ── ACC → Thalamus feedback ─────────────────────────────────
+      // Adapt salience weights based on error/surprise signals every cycle.
+      // Smooth interpolation prevents oscillation. Non-critical.
+      try {
+        const { SalienceService } = await import('./salience-service.js');
+        SalienceService.get_instance().adaptWeights();
+      } catch { /* non-critical */ }
+
       // Auto-journal distillation: distill aged-out conversation turns into
       // concise insights stored in agent_journal_auto. Runs every 60 cycles
       // (~30 min at 30s interval) to reduce LLM token consumption.
