@@ -39,13 +39,25 @@ export class MemoryDecayService {
     memoryType: string,
     createdAt: Date,
     lastAccessedAt: Date | null,
-    accessCount: number
+    accessCount: number,
+    emotionalArousal?: number,
+    decayResistant?: boolean
   ): number {
     const config = this.getConfig(memoryType);
     const lastAccess = lastAccessedAt || createdAt;
     const t = Math.max(1, (Date.now() - lastAccess.getTime()) / DAY_MS);
     const a = config.initialStrength;
-    const d = config.decayExponent;
+    let d = config.decayExponent;
+
+    // ── Emotional modulation of decay ──────────────────────────
+    // High-arousal events resist forgetting (amygdala modulation)
+    if (decayResistant) {
+      d *= 0.3;  // 70% slower decay for emotionally charged events
+    } else if (emotionalArousal !== undefined && emotionalArousal > 0.6) {
+      d *= 0.5;  // 50% slower decay for high-arousal events
+    } else if (emotionalArousal !== undefined && emotionalArousal < 0.2) {
+      d *= 1.5;  // 50% faster decay for low-arousal (boring) events
+    }
 
     let strength = a * Math.pow(t, -d);
 
